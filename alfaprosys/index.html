@@ -1,87 +1,257 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AlfaProSys — لأنظمة المحاسبة وإدارة المستودعات</title>
-<link rel="stylesheet" href="css/fonts.css">
-<link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AlfaProSys - نظام إدارة المبيعات والمخزون المتكامل">
+  <title>AlfaProSys — نظام إدارة المبيعات والمخزون</title>
+  
+  <!-- الخطوط والأنماط -->
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- أداة فحص للهاتف (Eruda DevTools) -->
+  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+  <script>eruda.init();</script>
 </head>
+
 <body>
-
-<!-- ============ شاشة اختيار الوحدة / الفرع ============ -->
-<div id="loginScreen">
-  <div class="bg-streaks">
-    <span style="width:220px;top:10%;right:-40px;"></span>
-    <span style="width:160px;top:35%;right:-80px;"></span>
-    <span style="width:280px;top:70%;right:-30px;"></span>
-    <span style="width:140px;top:88%;right:-100px;"></span>
-  </div>
-
-  <div class="login-hero">
-    <div class="streak-mark streak-lg"><span></span><span></span><span></span></div>
-    <h1 style="font-family:'Changa',sans-serif;font-size:32px;font-weight:800;color:var(--text);">AlfaProSys</h1>
-    <p style="color:var(--muted);font-weight:700;font-size:14px;margin-top:4px;">لأنظمة المحاسبة وإدارة المستودعات ونقاط البيع</p>
-    <span class="login-badge" style="margin-top:12px;">⚡ اختر الفرع أو وحدة العمل للبدء</span>
-  </div>
-
-  <div class="role-grid" id="unitGrid" style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:380px;position:relative;z-index:2;"></div>
-
-  <div class="login-footer" style="margin-top:24px;color:var(--muted-soft);font-size:12px;">مرحباً بك في AlfaProSys — اضغط على الفرع للدخول</div>
-</div>
-
-<script src="js/data.js"></script>
-<script src="js/app.js"></script>
-<script>
-
-function renderUnitCards() {
-  const grid = document.getElementById('unitGrid');
-  if (!grid) return;
-  const list = (typeof UNITS !== 'undefined' && UNITS.length > 0) ? UNITS : [
-    {id:'u1', name:'الإدارة العامة', type:'head'},
-    {id:'u2', name:'سوبر ماركت أبو سارة', type:'branch'},
-    {id:'u3', name:'أبو سارة 2', type:'branch'}
-  ];
   
-  grid.innerHTML = list.map(u => `
-    <div class="role-card" onclick="loginUnit('${u.id}')" style="cursor:pointer;padding:16px 18px;background:var(--card);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-sm);transition:all .2s ease;">
-      <div class="role-icon" style="font-size:30px;line-height:1;">${u.type === 'head' ? '🏢' : '🏬'}</div>
-      <div style="text-align:right;">
-        <div class="role-title" style="font-family:'Changa',sans-serif;font-size:15px;font-weight:700;color:var(--gold-dark);">${esc(u.name)}</div>
-        <div class="role-desc" style="font-size:12px;color:var(--muted);margin-top:3px;">${u.type === 'head' ? 'لوحة التحكم والضوابط الإدارية العامة' : 'شاشة نقطة البيع (الكاشير) والمخزون المباشر'}</div>
+  <!-- الصفحة الرئيسية -->
+  <div id="appPage" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
+    
+    <!-- شعار وعنوان -->
+    <div style="text-align: center; margin-bottom: 40px;">
+      <div style="font-size: 64px; margin-bottom: 10px;">🚀</div>
+      <h1 style="font-family: 'Changa', sans-serif; font-size: 48px; color: var(--gold-strong); margin: 0;">
+        AlfaProSys
+      </h1>
+      <p style="font-size: 18px; color: var(--text); margin-top: 10px;">
+        نظام إدارة المبيعات والمخزون المتكامل
+      </p>
+    </div>
+
+    <!-- حالة التحميل -->
+    <div id="loadingState" style="text-align: center;">
+      <div class="spinner" style="margin: 0 auto 20px;"></div>
+      <p style="font-size: 20px; color: var(--muted);">
+        🔄 جارٍ الاتصال بقاعدة البيانات...
+      </p>
+      <p style="font-size: 14px; color: var(--muted); margin-top: 10px;">
+        يرجى الانتظار...
+      </p>
+    </div>
+
+    <!-- رسالة النجاح (مخفية في البداية) -->
+    <div id="successState" style="display: none; text-align: center; max-width: 500px;">
+      <div style="font-size: 72px; margin-bottom: 20px;">✅</div>
+      <h2 style="color: var(--success); font-size: 32px; margin-bottom: 15px;">
+        تم الاتصال بنجاح!
+      </h2>
+      <div id="statsInfo" style="background: var(--card-bg); padding: 20px; border-radius: 12px; margin-bottom: 30px;">
+        <p style="font-size: 24px; margin: 10px 0;">
+          📦 <strong id="productsCount">0</strong> منتج
+        </p>
+        <p style="font-size: 24px; margin: 10px 0;">
+          👥 <strong id="customersCount">0</strong> عميل
+        </p>
+        <p style="font-size: 24px; margin: 10px 0;">
+          🏪 <strong id="suppliersCount">0</strong> مورد
+        </p>
       </div>
-    </div>`).join('');
-}
+      
+      <p style="font-size: 18px; color: var(--success); margin-bottom: 30px;">
+        🎉 النظام جاهز للعمل
+      </p>
 
-function loginUnit(uid){
-  const list = (typeof UNITS !== 'undefined') ? UNITS : [];
-  const u = list.find(x => x.id === uid) || {id: uid, type: uid === 'u1' ? 'head' : 'branch'};
+      <!-- أزرار التنقل -->
+      <div style="display: flex; flex-direction: column; gap: 15px; width: 100%;">
+        <a href="pos.html?unit=u2" class="btn btn-gold btn-block" style="font-size: 20px; padding: 15px;">
+          🛒 نقطة البيع (POS)
+        </a>
+        <a href="inventory.html?unit=u2" class="btn btn-ghost btn-block" style="font-size: 18px; padding: 15px;">
+          📦 إدارة المخزون
+        </a>
+        <a href="customers.html?unit=u2" class="btn btn-ghost btn-block" style="font-size: 18px; padding: 15px;">
+          👥 إدارة العملاء
+        </a>
+        <a href="reports.html?unit=u2" class="btn btn-ghost btn-block" style="font-size: 18px; padding: 15px;">
+          📊 التقارير
+        </a>
+      </div>
+    </div>
+
+    <!-- رسالة الخطأ (مخفية في البداية) -->
+    <div id="errorState" style="display: none; text-align: center; max-width: 500px;">
+      <div style="font-size: 72px; margin-bottom: 20px;">⚠️</div>
+      <h2 style="color: var(--rose-strong); font-size: 32px; margin-bottom: 15px;">
+        فشل الاتصال
+      </h2>
+      <p style="font-size: 18px; color: var(--muted); margin-bottom: 20px;">
+        لم يتم تحميل البيانات من Supabase
+      </p>
+      <div id="errorDetails" style="background: var(--card-bg); padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: monospace; font-size: 14px; text-align: left; color: var(--rose-strong); max-height: 200px; overflow-y: auto;">
+        <!-- تفاصيل الخطأ ستظهر هنا -->
+      </div>
+      <button onclick="location.reload()" class="btn btn-gold btn-block">
+        🔄 إعادة المحاولة
+      </button>
+      <p style="font-size: 14px; color: var(--muted); margin-top: 15px;">
+        💡 افتح Console (أيقونة Eruda أسفل الشاشة) لمزيد من التفاصيل
+      </p>
+    </div>
+
+  </div>
+
+  <!-- CSS للـ Spinner -->
+  <style>
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid var(--line);
+      border-top-color: var(--gold-strong);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .btn {
+      display: inline-block;
+      text-decoration: none;
+      text-align: center;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-gold {
+      background: var(--gold-strong);
+      color: var(--bg-dark);
+    }
+    .btn-gold:hover {
+      background: var(--gold-deep);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 2px solid var(--line);
+    }
+    .btn-ghost:hover {
+      background: var(--card-bg);
+      border-color: var(--gold-strong);
+    }
+    .btn-block {
+      display: block;
+      width: 100%;
+    }
+  </style>
+
+  <!-- ✅ السكربتات بالترتيب الصحيح -->
+  <script src="js/app.js"></script>
+  <script src="js/data.js"></script>
   
-  if (typeof promptUnitPin === 'function') {
-    promptUnitPin(uid, (validUid) => {
-      try { localStorage.setItem('aps_active_unit', validUid); } catch(e){}
-      if (u.type === 'head') {
-        location.href = 'dashboard.html?unit=' + validUid;
-      } else {
-        location.href = 'pos.html?unit=' + validUid;
-      }
+  <!-- سكربت الاختبار والتحقق -->
+  <script>
+    console.log('🔵 بدء تحميل الصفحة الرئيسية...');
+    
+    // متغيرات الحالة
+    let loadingEl = document.getElementById('loadingState');
+    let successEl = document.getElementById('successState');
+    let errorEl = document.getElementById('errorState');
+    let errorDetailsEl = document.getElementById('errorDetails');
+
+    // دالة عرض النجاح
+    function showSuccess(stats) {
+      console.log('✅ عرض رسالة النجاح');
+      loadingEl.style.display = 'none';
+      errorEl.style.display = 'none';
+      successEl.style.display = 'block';
+      
+      document.getElementById('productsCount').textContent = stats.products || 0;
+      document.getElementById('customersCount').textContent = stats.customers || 0;
+      document.getElementById('suppliersCount').textContent = stats.suppliers || 0;
+    }
+
+    // دالة عرض الخطأ
+    function showError(message) {
+      console.error('❌ عرض رسالة خطأ:', message);
+      loadingEl.style.display = 'none';
+      successEl.style.display = 'none';
+      errorEl.style.display = 'block';
+      errorDetailsEl.textContent = message;
+    }
+
+    // اختبار التحميل
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('📄 DOM جاهز');
+      
+      // التحقق من تحميل السكربتات
+      console.log('🔍 فحص السكربتات:');
+      console.log('  - activeUnitId:', typeof activeUnitId);
+      console.log('  - UNITS:', typeof UNITS !== 'undefined' ? UNITS : 'غير معرّف');
+      console.log('  - products:', typeof products !== 'undefined' ? products.length : 'غير معرّف');
+      console.log('  - customers:', typeof customers !== 'undefined' ? customers.length : 'غير معرّف');
+      console.log('  - suppliers:', typeof suppliers !== 'undefined' ? suppliers.length : 'غير معرّف');
+
+      // انتظار تحميل البيانات (5 ثوانٍ كحد أقصى)
+      let checkCount = 0;
+      const maxChecks = 50; // 5 ثوانٍ (50 × 100ms)
+      
+      const checkInterval = setInterval(function() {
+        checkCount++;
+        
+        // التحقق من تحميل البيانات
+        if (typeof products !== 'undefined' && products.length > 0) {
+          clearInterval(checkInterval);
+          console.log('✅ تم تحميل البيانات بنجاح!');
+          console.log(`  - ${products.length} منتج`);
+          console.log(`  - ${customers.length} عميل`);
+          console.log(`  - ${suppliers.length} مورد`);
+          
+          showSuccess({
+            products: products.length,
+            customers: customers.length,
+            suppliers: suppliers.length
+          });
+          
+          return;
+        }
+        
+        // إذا انتهى الوقت
+        if (checkCount >= maxChecks) {
+          clearInterval(checkInterval);
+          console.error('❌ انتهت مهلة الانتظار - لم يتم تحميل البيانات');
+          
+          let errorMsg = 'لم يتم تحميل البيانات من Supabase\n\n';
+          errorMsg += 'تفاصيل الفحص:\n';
+          errorMsg += `- activeUnitId: ${typeof activeUnitId}\n`;
+          errorMsg += `- UNITS: ${typeof UNITS !== 'undefined' ? 'موجود' : 'غير موجود'}\n`;
+          errorMsg += `- products: ${typeof products !== 'undefined' ? products.length : 'غير معرّف'}\n`;
+          errorMsg += `- customers: ${typeof customers !== 'undefined' ? customers.length : 'غير معرّف'}\n`;
+          errorMsg += `- suppliers: ${typeof suppliers !== 'undefined' ? suppliers.length : 'غير معرّف'}\n\n`;
+          errorMsg += 'تحقق من:\n';
+          errorMsg += '1. اتصال الإنترنت\n';
+          errorMsg += '2. بيانات Supabase في data.js\n';
+          errorMsg += '3. Console (Eruda) للأخطاء التفصيلية';
+          
+          showError(errorMsg);
+        }
+      }, 100); // فحص كل 100ms
     });
-    return;
-  }
 
-  try { localStorage.setItem('aps_active_unit', uid); } catch(e){}
-  
-  if(u.type === 'head'){
-    location.href = 'dashboard.html?unit=' + u.id;
-  } else {
-    location.href = 'pos.html?unit=' + u.id;
-  }
-}
+    // التعامل مع الأخطاء العامة
+    window.addEventListener('error', function(e) {
+      console.error('❌ خطأ JavaScript:', e.message, e.filename, e.lineno);
+    });
 
-document.addEventListener('DOMContentLoaded', () => {
-  renderUnitCards();
-});
-renderUnitCards();
-</script>
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('❌ Promise مرفوض:', e.reason);
+    });
+  </script>
+
 </body>
 </html>
