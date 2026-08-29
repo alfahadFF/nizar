@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — العملاء</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+<style>
+/* كشف الحساب — مستند A4 عادي (وليس إيصال حراري 80مم كباقي النظام) */
+.stmt-doc{width:100%;max-width:480px;background:#fff;color:#000;padding:14px;font-family:'Almarai',sans-serif;font-size:12.5px;line-height:1.7;border-radius:6px;}
+.stmt-doc h2{font-family:'Changa';font-size:16px;margin-bottom:2px;}
+.stmt-doc .stmt-sub{color:#555;font-size:11.5px;margin-bottom:10px;}
+.stmt-doc .stmt-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #ccc;}
+.stmt-doc .stmt-debt{font-family:'Changa';font-weight:800;font-size:17px;background:#fbeaea;color:#a83a2c;padding:8px 10px;border-radius:8px;margin:10px 0;text-align:center;}
+.stmt-doc table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:6px;}
+.stmt-doc th{text-align:right;border-bottom:1.5px solid #000;padding:4px 2px;font-size:11px;}
+.stmt-doc td{padding:4px 2px;border-bottom:1px dotted #ccc;}
+.stmt-doc .stmt-foot{margin-top:10px;font-size:11px;color:#555;text-align:center;}
+/* طباعة كشف الحساب كورقة A4 عادية — مختلف عن إيصال 80مم الحراري بباقي شاشات النظام */
+@media print{
+  body.stmt-page #printArea{width:auto !important;margin:0 !important;padding:0 !important;}
+  body.stmt-page{background:#fff !important;}
+  @page{size:auto;margin:14mm;}
+}
+</style>
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة إضافة عميل (لعميل سابق عليه ذمم قبل النظام مثلًا) ============ -->
+<div class="modal-overlay" id="custModal">
+  <div class="modal-card" style="max-width:520px;">
+    <div class="modal-head"><h3>➕ إضافة عميل</h3><button class="modal-close" onclick="closeModal('custModal')">✕</button></div>
+    <div class="form-group">
+      <label>الاسم *</label>
+      <input type="text" id="nc_name" placeholder="اسم العميل">
+    </div>
+    <div class="form-row2">
+      <div class="form-group">
+        <label>رقم الهاتف *</label>
+        <input type="tel" id="nc_phone" placeholder="رقم الهاتف" class="tabular">
+      </div>
+      <div class="form-group">
+        <label>رقم الواتساب (إن اختلف)</label>
+        <input type="tel" id="nc_wa" placeholder="رقم الواتساب" class="tabular">
+      </div>
+    </div>
+    <div class="form-row2">
+      <div class="form-group">
+        <label>الذمم الحالية (إن وُجدت)</label>
+        <input type="number" id="nc_debt" value="0" class="tabular">
+      </div>
+      <div class="form-group">
+        <label>سقف الذمم المسموح به *</label>
+        <input type="number" id="nc_limit" placeholder="مثال: 5000000" class="tabular">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>تاريخ تسديد متفق عليه (اختياري)</label>
+      <input type="date" id="nc_due">
+    </div>
+    <div class="row-sub" style="margin-bottom:10px;">سقف الذمم: عند وصول ذمم العميل لهذا الحد أثناء البيع، يظهر تنبيه فوري للكاشير بضرورة التوقف عن البيع بالدين لهذا العميل. اترك الحقل فارغًا أو صفرًا لعدم وضع أي سقف.</div>
+    <div class="row-sub" style="margin-bottom:10px;">مخصص لعميل كان يتعامل قبل استخدام النظام وعليه ذمم مسبقة — العملاء الجدد يُنشؤون تلقائيًا من شاشة البيع عند إدخال بياناتهم بالفاتورة.</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('custModal')">إلغاء</button>
+      <button class="btn btn-gold btn-block" onclick="saveNewCustomer()">💾 حفظ العميل</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ نافذة تسديد دفعة ============ -->
+<div class="modal-overlay" id="payCustModal">
+  <div class="modal-card" style="max-width:460px;">
+    <div class="modal-head"><h3 id="payCustTitle">💳 تسديد دفعة</h3><button class="modal-close" onclick="closeModal('payCustModal')">✕</button></div>
+    <div id="payCustBody"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة سجل الفواتير السابقة ============ -->
+<div class="modal-overlay" id="custInvModal">
+  <div class="modal-card" style="max-width:520px;">
+    <div class="modal-head"><h3 id="custInvTitle">🧾 الفواتير السابقة</h3><button class="modal-close" onclick="closeModal('custInvModal')">✕</button></div>
+    <div id="custInvBody"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة كشف حساب مختصر (نص جاهز للواتساب أو PDF عبر الطباعة) ============ -->
+<div class="modal-overlay" id="statementModal">
+  <div class="modal-card" style="max-width:560px;">
+    <div class="modal-head"><h3 id="stmtTitle">📄 كشف حساب</h3><button class="modal-close" onclick="closeModal('statementModal')">✕</button></div>
+    <div class="print-stage" style="padding:10px;">
+      <div class="stmt-doc" id="stmtDoc"></div>
+    </div>
+    <div class="form-group" style="margin-top:10px;">
+      <label>نص جاهز للنسخ وإرساله عبر واتساب</label>
+      <textarea id="stmtText" readonly rows="9" style="width:100%;padding:10px;border:1px solid var(--line-hi);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12px;font-family:inherit;resize:vertical;"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline btn-block" onclick="copyStatementText()">📋 نسخ النص</button>
+      <button class="btn btn-gold btn-block" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- منطقة طباعة كشف الحساب الفعلية (تظهر فقط عند الطباعة/حفظ PDF عبر طباعة المتصفح) -->
+<div id="printArea"></div>
+
+<!-- ============ نافذة ضبط تاريخ التسديد ============ -->
+<div class="modal-overlay" id="dueDateModal">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head"><h3>📅 تاريخ التسديد المتفق عليه</h3><button class="modal-close" onclick="closeModal('dueDateModal')">✕</button></div>
+    <div class="form-group">
+      <label>التاريخ</label>
+      <input type="date" id="dd_date">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('dueDateModal')">إلغاء</button>
+      <button class="btn btn-gold btn-block" onclick="saveDueDate()">💾 حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ نافذة ضبط سقف الذمم ============ -->
+<div class="modal-overlay" id="limitModal">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head"><h3>🚫 سقف الذمم المسموح به</h3><button class="modal-close" onclick="closeModal('limitModal')">✕</button></div>
+    <div class="form-group">
+      <label>السقف (اترك 0 لعدم وضع أي سقف)</label>
+      <input type="number" id="lm_limit" class="tabular">
+    </div>
+    <div class="row-sub" style="margin-bottom:10px;">عند وصول ذمم هذا العميل لهذا الحد أثناء البيع، سيظهر تنبيه فوري للكاشير بضرورة التوقف عن البيع له بالدين.</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('limitModal')">إلغاء</button>
+      <button class="btn btn-gold btn-block" onclick="saveLimitAmount()">💾 حفظ</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة العملاء — الذمم، الدفعات، تاريخ التسديد، الفواتير السابقة
+   العميل يُنشأ تلقائيًا من بيانات الفاتورة بشاشة البيع، أو يدويًا هنا (عميل سابق عليه ذمم)
+   ===================================================================== */
+let custSearch = '';
+let custFilter = 'all'; // all | debt | clear
+let payTarget = null;
+let dueDateTarget = null;
+let limitTarget = null;
+
+function filteredCustomers(){
+  return customers.filter(c => {
+    if(custFilter === 'debt' && !(c.debt > 0)) return false;
+    if(custFilter === 'clear' && c.debt > 0) return false;
+    if(custSearch){
+      const hay = [c.name, c.phone, c.whatsapp].join(' ');
+      if(!fuzzyIncludes(hay, custSearch)) return false;
+    }
+    return true;
+  }).sort((a,b) => (b.debt||0) - (a.debt||0));
+}
+
+function render(){
+  const totalDebt = customers.reduce((s,c) => s + (c.debt||0), 0);
+  const withDebt = customers.filter(c => c.debt > 0).length;
+  const overdue = customers.filter(c => c.dueDate && daysUntil(c.dueDate) < 0 && c.debt > 0).length;
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>العملاء</h2>
+      <div class="section-sub">إجمالي العملاء: ${fmtNum(customers.length)} — الذمم الإجمالية: <b class="tabular">${fmt(totalDebt)}</b></div>
+    </div>
+    <button class="btn btn-gold" onclick="openAddCustomer()">➕ إضافة عميل</button>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-val tabular">${fmtNum(customers.length)}</div><div class="stat-lbl">إجمالي العملاء</div></div>
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-val tabular" style="color:var(--clay)">${fmtNum(withDebt)}</div><div class="stat-lbl">عليهم ذمم</div></div>
+    <div class="stat-card"><div class="stat-icon">⏰</div><div class="stat-val tabular" style="color:var(--amber)">${fmtNum(overdue)}</div><div class="stat-lbl">تجاوزوا تاريخ التسديد</div></div>
+    <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-val tabular">${fmt(totalDebt)}</div><div class="stat-lbl">إجمالي الذمم</div></div>
+  </div>
+
+  <div class="card-box">
+    <div class="search-box" style="min-height:42px;">
+      <span>🔍</span>
+      <input type="text" placeholder="بحث بالاسم / الهاتف / الواتساب..." value="${esc(custSearch)}" oninput="custSearch=this.value;renderCustRows()">
+    </div>
+    <div class="cat-chips" style="margin-top:10px;margin-bottom:0;">
+      <button class="cat-chip ${custFilter==='all'?'active':''}" onclick="setCustFilter('all')">الكل</button>
+      <button class="cat-chip ${custFilter==='debt'?'active':''}" onclick="setCustFilter('debt')">عليهم ذمم</button>
+      <button class="cat-chip ${custFilter==='clear'?'active':''}" onclick="setCustFilter('clear')">لا ذمم عليهم</button>
+    </div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <table class="data-tbl">
+      <thead><tr>
+        <th>الاسم</th><th>الهاتف</th><th>الواتساب</th><th>الذمم</th><th>سقف الذمم</th><th>تاريخ التسديد</th><th>آخر زيارة</th><th>الفواتير</th><th></th><th></th>
+      </tr></thead>
+      <tbody id="custRows"></tbody>
+    </table>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+  renderCustRows();
+}
+function setCustFilter(f){ custFilter = f; render(); }
+
+function dueDateBadge(c){
+  if(!c.dueDate) return '<span class="badge badge-muted">غير محدد</span>';
+  const d = daysUntil(c.dueDate);
+  if(c.debt <= 0) return `<span class="badge badge-sage tabular">${esc(c.dueDate)}</span>`;
+  if(d < 0) return `<span class="badge badge-clay tabular">تجاوز (${esc(c.dueDate)})</span>`;
+  if(d <= 3) return `<span class="badge badge-amber tabular">${esc(c.dueDate)} — بعد ${d} يوم</span>`;
+  return `<span class="badge badge-gold tabular">${esc(c.dueDate)}</span>`;
+}
+function limitBadge(c){
+  if(!c.creditLimit) return '<span class="badge badge-muted">بدون سقف</span>';
+  const overLimit = isOverCreditLimit(c);
+  const cls = overLimit ? 'badge-clay' : (c.debt >= c.creditLimit * 0.8 ? 'badge-amber' : 'badge-sage');
+  return `<span class="badge ${cls} tabular">${fmtNum(c.creditLimit)}${overLimit ? ' — وصل للسقف!' : ''}</span>`;
+}
+/* نقطة حمراء بجانب اسم العميل تدل على وجود ذمم سابقة عليه */
+function debtDot(c){
+  return c.debt > 0 ? `<span title="عليه ذمم سابقة" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--clay);margin-inline-start:6px;vertical-align:middle;"></span>` : '';
+}
+function renderCustRows(){
+  const rowsEl = document.getElementById('custRows');
+  if(!rowsEl) return;
+  const list = filteredCustomers();
+  if(list.length === 0){
+    rowsEl.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:22px;">لا يوجد عملاء مطابقون</td></tr>`;
+    return;
+  }
+  rowsEl.innerHTML = list.map(c => `
+    <tr>
+      <td><div class="row-title" style="margin-bottom:0;">${esc(c.name)}${debtDot(c)}</div></td>
+      <td class="tabular">${esc(c.phone || '—')}</td>
+      <td class="tabular">${esc(c.whatsapp || '—')}</td>
+      <td class="tabular" style="font-weight:800;${c.debt>0?'color:var(--clay);':''}">${fmtNum(c.debt||0)}</td>
+      <td>
+        ${limitBadge(c)}
+        <button class="btn btn-outline" style="padding:3px 7px;font-size:10px;margin-inline-start:4px;" onclick="openLimitModal('${c.id}')">✏️</button>
+      </td>
+      <td>
+        ${dueDateBadge(c)}
+        <button class="btn btn-outline" style="padding:3px 7px;font-size:10px;margin-inline-start:4px;" onclick="openDueDateModal('${c.id}')">✏️</button>
+      </td>
+      <td class="tabular">${esc(c.lastVisit || '—')}</td>
+      <td>
+        <button class="btn btn-outline" style="padding:6px 10px;font-size:11px;" onclick="openCustInvoices('${c.id}')">
+          🧾 ${fmtNum((c.invoiceIds||[]).length)}
+        </button>
+      </td>
+      <td>
+        <button class="btn btn-gold" style="padding:6px 10px;font-size:11px;" ${c.debt<=0?'disabled style="opacity:.4;"':''} onclick="openPayModal('${c.id}')">💳 تسديد دفعة</button>
+      </td>
+      <td>
+        <button class="btn btn-outline" style="padding:6px 10px;font-size:11px;" onclick="openStatementModal('${c.id}')">📄 كشف حساب</button>
+      </td>
+    </tr>`).join('');
+}
+
+/* ---------- إضافة عميل يدويًا (لعميل سابق عليه ذمم) ---------- */
+function openAddCustomer(){
+  document.getElementById('nc_name').value = '';
+  document.getElementById('nc_phone').value = '';
+  document.getElementById('nc_wa').value = '';
+  document.getElementById('nc_debt').value = '0';
+  document.getElementById('nc_limit').value = '';
+  document.getElementById('nc_due').value = '';
+  openModal('custModal');
+}
+function saveNewCustomer(){
+  const name = document.getElementById('nc_name').value.trim();
+  const phone = document.getElementById('nc_phone').value.trim();
+  const wa = document.getElementById('nc_wa').value.trim();
+  const debt = Number(document.getElementById('nc_debt').value) || 0;
+  const creditLimit = Number(document.getElementById('nc_limit').value) || 0;
+  const due = document.getElementById('nc_due').value || null;
+  if(!name || !phone){ showToast('يرجى تعبئة الاسم ورقم الهاتف على الأقل', '⚠️'); return; }
+  if(!creditLimit){ showToast('يرجى تحديد سقف الذمم المسموح به لهذا العميل', '⚠️'); return; }
+  const digits = phone.replace(/\D/g, '');
+  if(customers.some(c => c.phone.replace(/\D/g,'') === digits)){
+    showToast('يوجد عميل مسجّل بنفس رقم الهاتف مسبقًا', '⚠️');
+    return;
+  }
+  addCustomerManual({
+    id: 'c' + Date.now(), name, phone, whatsapp: wa || phone,
+    debt, creditLimit, dueDate: due, lastVisit: '', payments: [], invoiceIds: []
+  });
+  closeModal('custModal');
+  showToast('تمت إضافة العميل', '✅');
+  render();
+}
+
+/* ---------- تسديد دفعة ---------- */
+function openPayModal(id){
+  const c = customers.find(x => x.id === id);
+  if(!c) return;
+  payTarget = id;
+  document.getElementById('payCustTitle').innerText = '💳 تسديد دفعة — ' + c.name;
+  document.getElementById('payCustBody').innerHTML = `
+    <div class="row-sub" style="margin-bottom:10px;">الذمم الحالية: <b class="tabular" style="color:var(--clay)">${fmt(c.debt)}</b></div>
+    <div class="form-group">
+      <label>المبلغ المدفوع</label>
+      <input type="number" id="pc_amount" value="${c.debt}" max="${c.debt}" min="1" class="tabular" oninput="updatePayPreview()">
+    </div>
+    <div class="seg" style="margin-bottom:10px;">
+      <button class="pc-method active" data-m="cash" onclick="setPayMethod(this,'cash')">💵 نقدًا</button>
+      <button class="pc-method" data-m="wallet" onclick="setPayMethod(this,'wallet')">📱 محفظة</button>
+    </div>
+    <div class="form-group" id="pc_opnoWrap" style="display:none;">
+      <label>رقم عملية التحويل</label>
+      <input type="text" id="pc_opno" placeholder="رقم عملية التحويل" class="tabular">
+    </div>
+    <div class="pay-summary-mini" style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;">
+      <span>الباقي بعد هذه الدفعة</span>
+      <b class="tabular" id="pc_remaining">${fmt(0)}</b>
+    </div>
+    <button class="btn btn-gold btn-block" onclick="confirmPayCustomer()">✅ تأكيد التسديد</button>`;
+  document.getElementById('payCustBody').dataset.method = 'cash';
+  openModal('payCustModal');
+  updatePayPreview();
+}
+function setPayMethod(btn, m){
+  document.querySelectorAll('.pc-method').forEach(b => b.classList.toggle('active', b === btn));
+  document.getElementById('payCustBody').dataset.method = m;
+  document.getElementById('pc_opnoWrap').style.display = m === 'wallet' ? 'block' : 'none';
+}
+function updatePayPreview(){
+  const c = customers.find(x => x.id === payTarget);
+  if(!c) return;
+  let a = Number(document.getElementById('pc_amount').value) || 0;
+  a = Math.max(0, Math.min(a, c.debt));
+  document.getElementById('pc_remaining').innerText = fmt(c.debt - a);
+}
+function confirmPayCustomer(){
+  const c = customers.find(x => x.id === payTarget);
+  if(!c) return;
+  const method = document.getElementById('payCustBody').dataset.method;
+  let amount = Number(document.getElementById('pc_amount').value) || 0;
+  amount = Math.max(0, Math.min(amount, c.debt));
+  if(amount <= 0){ showToast('أدخل مبلغًا صحيحًا', '⚠️'); return; }
+  const opNo = method === 'wallet' ? document.getElementById('pc_opno').value.trim() : '';
+  if(method === 'wallet' && !opNo){ showToast('أدخل رقم عملية التحويل', '⚠️'); return; }
+  addCustomerPayment(c.id, amount, method === 'wallet' ? 'محفظة' : 'نقدي', opNo);
+  /* الدفعة النقدية فقط تدخل صندوق الفرع فعليًا (المحفظة/التحويل لا تُحتسب نقدًا بالدرج) */
+  if(method === 'cash'){
+    addCashboxTx(activeUnitId(), {type:'تحصيل دين', desc:`دفعة من ${c.name}`, amount, direction:'in', method:'نقدي', ref:c.id});
+  }
+  logAudit('customer_payment', activeUnitId(), '', `تحصيل دفعة ${fmtNum(amount)} ل.س من العميل ${c.name}`);
+  closeModal('payCustModal');
+  showToast(`تم تسجيل دفعة ${fmtNum(amount)} ل.س — الباقي ${fmtNum(c.debt)} ل.س`, '✅');
+  render();
+}
+
+/* ---------- تاريخ التسديد ---------- */
+function openDueDateModal(id){
+  const c = customers.find(x => x.id === id);
+  if(!c) return;
+  dueDateTarget = id;
+  document.getElementById('dd_date').value = c.dueDate || '';
+  openModal('dueDateModal');
+}
+function saveDueDate(){
+  const v = document.getElementById('dd_date').value || null;
+  updateCustomer(dueDateTarget, {dueDate: v});
+  closeModal('dueDateModal');
+  showToast('تم تحديث تاريخ التسديد', '✅');
+  render();
+}
+
+/* ---------- سقف الذمم ---------- */
+function openLimitModal(id){
+  const c = customers.find(x => x.id === id);
+  if(!c) return;
+  limitTarget = id;
+  document.getElementById('lm_limit').value = c.creditLimit || '';
+  openModal('limitModal');
+}
+function saveLimitAmount(){
+  const v = Number(document.getElementById('lm_limit').value) || 0;
+  updateCustomer(limitTarget, {creditLimit: v || null});
+  closeModal('limitModal');
+  showToast('تم تحديث سقف الذمم', '✅');
+  render();
+}
+
+/* ---------- الفواتير السابقة ---------- */
+function openCustInvoices(id){
+  const c = customers.find(x => x.id === id);
+  if(!c) return;
+  document.getElementById('custInvTitle').innerText = '🧾 الفواتير السابقة — ' + c.name;
+  const ids = c.invoiceIds || [];
+  const invs = ids.map(iid => invoices.find(i => i.id === iid)).filter(Boolean);
+  let html = '';
+  if(invs.length === 0){
+    html = `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد فواتير مسجّلة لهذا العميل بعد</div>`;
+  } else {
+    html = invs.map(inv => `
+      <div class="list-row">
+        <div class="row-main">
+          <div class="row-title">فاتورة #${esc(inv.id)} — ${esc(inv.status || '')}</div>
+          <div class="row-sub tabular">${esc(inv.date)} • الإجمالي ${fmtNum(inv.total)} • المتبقي ${fmtNum(inv.remaining||0)}</div>
+        </div>
+      </div>`).join('');
+  }
+  if((c.payments||[]).length > 0){
+    html += `<h3 style="margin-top:14px;">💳 سجل الدفعات</h3>`;
+    html += c.payments.map(p => `
+      <div class="list-row">
+        <div class="row-main">
+          <div class="row-title">دفعة ${fmtNum(p.amount)} ل.س — ${esc(p.method)}${p.opNo ? ' (رقم العملية: ' + esc(p.opNo) + ')' : ''}</div>
+          <div class="row-sub tabular">${esc(p.date)}</div>
+        </div>
+      </div>`).join('');
+  }
+  document.getElementById('custInvBody').innerHTML = html;
+  openModal('custInvModal');
+}
+
+/* ---------- كشف حساب مختصر (للإرسال للعميل المدين أو من استحق موعد التسديد) ---------- */
+let statementTarget = null;
+function buildStatementData(c){
+  const ids = c.invoiceIds || [];
+  const invs = ids.map(iid => invoices.find(i => i.id === iid)).filter(Boolean).slice(0,5);
+  return {c, invs};
+}
+function openStatementModal(id){
+  const c = customers.find(x => x.id === id);
+  if(!c) return;
+  statementTarget = id;
+  const {invs} = buildStatementData(c);
+  const R = (typeof RECEIPT !== 'undefined') ? RECEIPT : {};
+  const today = nowStr().slice(0,10);
+
+  const dueLine = c.dueDate
+    ? (c.debt > 0 && daysUntil(c.dueDate) < 0
+        ? `<b style="color:#a83a2c;">تجاوز تاريخ التسديد المتفق عليه (${esc(c.dueDate)})</b>`
+        : `تاريخ التسديد المتفق عليه: <b>${esc(c.dueDate)}</b>`)
+    : 'لا يوجد تاريخ تسديد محدد';
+
+  const invRows = invs.map(inv => `
+    <tr>
+      <td class="tabular">${esc(inv.id)}</td>
+      <td class="tabular">${esc((inv.date||'').slice(0,10))}</td>
+      <td class="tabular">${fmtNum(inv.total)}</td>
+      <td class="tabular">${fmtNum(inv.remaining||0)}</td>
+    </tr>`).join('');
+
+  document.getElementById('stmtTitle').innerText = '📄 كشف حساب — ' + c.name;
+  document.getElementById('stmtDoc').innerHTML = `
+    <h2>${esc(R.storeName || 'كشف حساب')}</h2>
+    <div class="stmt-sub">تاريخ الكشف: ${esc(today)}${R.phone ? ' — هاتف المنشأة: ' + esc(R.phone) : ''}</div>
+    <div class="stmt-row"><span>اسم العميل</span><b>${esc(c.name)}</b></div>
+    <div class="stmt-row"><span>الهاتف</span><b class="tabular">${esc(c.phone || '—')}</b></div>
+    <div class="stmt-row"><span>${dueLine}</span><span></span></div>
+    <div class="stmt-debt">الذمة المستحقة حاليًا: ${fmtNum(c.debt)} ل.س</div>
+    ${invs.length > 0 ? `
+    <table>
+      <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الإجمالي</th><th>المتبقي</th></tr></thead>
+      <tbody>${invRows}</tbody>
+    </table>` : `<div class="stmt-sub">لا توجد فواتير مسجّلة لهذا العميل</div>`}
+    <div class="stmt-foot">كشف حساب مختصر — يُرجى المبادرة بالتسديد في أقرب وقت ممكن</div>`;
+
+  /* نص جاهز للنسخ وإرساله مباشرة عبر واتساب */
+  let text = `📄 كشف حساب${R.storeName ? ' — ' + R.storeName : ''}\n`;
+  text += `العميل: ${c.name}\n`;
+  text += `التاريخ: ${today}\n`;
+  text += c.dueDate ? `تاريخ التسديد المتفق عليه: ${c.dueDate}${c.debt > 0 && daysUntil(c.dueDate) < 0 ? ' (متجاوَز)' : ''}\n` : '';
+  text += `\n💰 الذمة المستحقة حاليًا: ${fmtNum(c.debt)} ل.س\n`;
+  if(invs.length > 0){
+    text += `\nآخر الفواتير:\n`;
+    invs.forEach(inv => {
+      text += `- فاتورة #${inv.id} بتاريخ ${(inv.date||'').slice(0,10)} — الإجمالي ${fmtNum(inv.total)} — المتبقي ${fmtNum(inv.remaining||0)}\n`;
+    });
+  }
+  text += `\nيُرجى المبادرة بالتسديد في أقرب وقت ممكن، ولكم الشكر.`;
+  document.getElementById('stmtText').value = text;
+
+  openModal('statementModal');
+}
+function copyStatementText(){
+  const ta = document.getElementById('stmtText');
+  ta.select();
+  ta.setSelectionRange(0, 999999);
+  try{
+    document.execCommand('copy');
+    showToast('تم نسخ نص كشف الحساب — يمكنك لصقه بمحادثة واتساب', '📋');
+  }catch(e){
+    navigator.clipboard && navigator.clipboard.writeText(ta.value)
+      .then(() => showToast('تم نسخ نص كشف الحساب', '📋'))
+      .catch(() => showToast('تعذّر النسخ التلقائي — انسخ النص يدويًا', '⚠️'));
+  }
+}
+function printStatement(){
+  const html = document.getElementById('stmtDoc').innerHTML;
+  document.getElementById('printArea').innerHTML = `<div class="stmt-doc" style="max-width:100%;">${html}</div>`;
+  document.body.classList.add('stmt-page');
+  window.print();
+  setTimeout(() => document.body.classList.remove('stmt-page'), 500);
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(activeUnitId());
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+renderTopbar('العملاء');
+renderShellNav('customers');
+render();
+renderNotifications();
+initRealtimeNotifs();
+</script>
+</body>
+</html>

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — الصندوق</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة فتح وردية (شكلية — رصيد افتتاحي فقط) ============ -->
+<div class="modal-overlay" id="openShiftModal">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head"><h3>🟢 فتح وردية</h3><button class="modal-close" onclick="closeModal('openShiftModal')">✕</button></div>
+    <div class="form-group">
+      <label>الرصيد الافتتاحي (النقد الموجود بالدرج الآن)</label>
+      <input type="number" id="os_amount" value="0" class="tabular">
+    </div>
+    <div class="row-sub" style="margin-bottom:10px;">ملاحظة: نظام الورديات هنا شكلي فقط لعرض رقم مرجعي عند المطابقة اليدوية — لا يوجد تسجيل دخول فعلي للكاشيرية بهذه المرحلة.</div>
+    <button class="btn btn-gold btn-block" onclick="confirmOpenShift()">✅ فتح الوردية</button>
+  </div>
+</div>
+
+<!-- ============ نافذة إغلاق وردية (جرد يدوي) ============ -->
+<div class="modal-overlay" id="closeShiftModal">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head"><h3>🔴 إغلاق الوردية وجرد الصندوق</h3><button class="modal-close" onclick="closeModal('closeShiftModal')">✕</button></div>
+    <div id="closeShiftBody"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة مصروف نقدي سريع ============ -->
+<div class="modal-overlay" id="expenseModal">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head"><h3>🧾 تسجيل مصروف نقدي</h3><button class="modal-close" onclick="closeModal('expenseModal')">✕</button></div>
+    <div class="form-group">
+      <label>وصف المصروف</label>
+      <input type="text" id="ex_desc" placeholder="مثال: فاتورة كهرباء">
+    </div>
+    <div class="form-group">
+      <label>المبلغ</label>
+      <input type="number" id="ex_amount" class="tabular" placeholder="0">
+    </div>
+    <button class="btn btn-gold btn-block" onclick="confirmExpense()">💾 تسجيل المصروف (خروج)</button>
+  </div>
+</div>
+
+<!-- ============ نافذة سحب / إيداع يدوي ============ -->
+<div class="modal-overlay" id="manualTxModal">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head"><h3 id="mtxTitle">💵 سحب / إيداع يدوي</h3><button class="modal-close" onclick="closeModal('manualTxModal')">✕</button></div>
+    <div class="seg" style="margin-bottom:10px;">
+      <button class="mtx-dir active" data-d="in" onclick="setManualDir(this,'in')">⬇️ إيداع</button>
+      <button class="mtx-dir" data-d="out" onclick="setManualDir(this,'out')">⬆️ سحب</button>
+    </div>
+    <div class="form-group">
+      <label>السبب / الملاحظة</label>
+      <input type="text" id="mtx_desc" placeholder="مثال: نثريات، تحويل فائض...">
+    </div>
+    <div class="form-group">
+      <label>المبلغ</label>
+      <input type="number" id="mtx_amount" class="tabular" placeholder="0">
+    </div>
+    <button class="btn btn-gold btn-block" onclick="confirmManualTx()">💾 تسجيل الحركة</button>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة الصندوق — صندوق مستقل لكل فرع فعلي (u2/u3)
+   الإدارة (u1) لا تملك صندوقًا تشغيليًا — تعرض تقريرًا موحّدًا لصناديق الفروع كلها
+   نظام الورديات هنا شكلي بالكامل (رصيد افتتاحي/جرد يدوي فقط — بدون تسجيل دخول كاشيرية فعلي)
+   ===================================================================== */
+const uid = activeUnitId();
+const isHead = (UNITS.find(u => u.id === uid) || {}).type === 'head';
+let mtxDir = 'in';
+
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id; }
+
+function todayTx(branch){
+  const today = (typeof nowStr === 'function' ? nowStr() : '').slice(0,10);
+  return cashboxTx.filter(t => t.branch === branch && (t.time || '').slice(0,10) === today);
+}
+function methodSummary(branch){
+  /* ملخص طرق الدفع من فواتير اليوم لهذا الفرع (نقدي/محفظة/آجل) — وليس فقط حركات الصندوق النقدية */
+  const today = (typeof nowStr === 'function' ? nowStr() : '').slice(0,10);
+  const todays = invoices.filter(iv => iv.branch === branch && (iv.date || '').slice(0,10) === today);
+  const sums = {cash:0, wallet:0, credit:0};
+  todays.forEach(iv => {
+    if(iv.payMethod === 'cash') sums.cash += iv.paid;
+    else if(iv.payMethod === 'wallet') sums.wallet += iv.paid;
+    if(iv.remaining > 0) sums.credit += iv.remaining;
+  });
+  return sums;
+}
+
+function render(){
+  if(isHead){ renderHeadReport(); return; }
+  const balance = cashboxBalance(uid);
+  const st = shiftState[uid] || {openingBalance:0, openedAt:null};
+  const isOpen = !!st.openedAt;
+  const sums = methodSummary(uid);
+  const tx = todayTx(uid);
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>الصندوق — ${esc(branchName(uid))}</h2>
+      <div class="section-sub">${isOpen ? 'وردية مفتوحة منذ ' + esc(st.openedAt) : 'لا توجد وردية مفتوحة حاليًا'}</div>
+    </div>
+    ${isOpen
+      ? `<button class="btn btn-danger" onclick="openCloseShift()">🔴 إغلاق الوردية</button>`
+      : `<button class="btn btn-gold" onclick="openModal('openShiftModal')">🟢 فتح وردية</button>`}
+  </div>
+
+  <div class="card-box" style="text-align:center;padding:20px 14px;">
+    <div class="stat-lbl">الرصيد النقدي الحالي بالصندوق</div>
+    <div class="stat-val tabular" style="font-size:30px;margin-top:6px;${balance < 0 ? 'color:var(--clay);' : ''}">${fmtNum(balance)}<span style="font-size:14px;"> ل.س</span></div>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">💵</div><div class="stat-val tabular" style="color:var(--sage)">${fmtNum(sums.cash)}</div><div class="stat-lbl">مبيعات نقدية اليوم</div></div>
+    <div class="stat-card"><div class="stat-icon">📱</div><div class="stat-val tabular" style="color:var(--gold-deep)">${fmtNum(sums.wallet)}</div><div class="stat-lbl">مبيعات محفظة اليوم</div></div>
+    <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-val tabular" style="color:var(--clay)">${fmtNum(sums.credit)}</div><div class="stat-lbl">آجل (ذمم) اليوم</div></div>
+    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-val tabular">${fmtNum(sums.cash + sums.wallet + sums.credit)}</div><div class="stat-lbl">إجمالي مبيعات اليوم</div></div>
+  </div>
+
+  <div class="card-box">
+    <h3>⚡ إجراءات سريعة</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-outline" onclick="openModal('expenseModal')">🧾 تسجيل مصروف نقدي</button>
+      <button class="btn btn-outline" onclick="openManualTx('in')">⬇️ إيداع نقدي</button>
+      <button class="btn btn-outline" onclick="openManualTx('out')">⬆️ سحب نقدي</button>
+      <button class="btn btn-outline" onclick="location.href='suppliers.html?unit=${uid}'">🧾 فاتورة شراء جديدة</button>
+    </div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <h3>📋 حركة الصندوق اليوم</h3>
+    <table class="data-tbl">
+      <thead><tr><th>الوقت</th><th>النوع</th><th>الوصف</th><th>الطريقة</th><th>المبلغ</th></tr></thead>
+      <tbody>
+        ${tx.length === 0
+          ? `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:22px;">لا توجد حركات صندوق اليوم بعد</td></tr>`
+          : tx.map(t => `
+          <tr>
+            <td class="tabular">${esc((t.time||'').slice(11))}</td>
+            <td>${esc(t.type)}</td>
+            <td>${esc(t.desc)}</td>
+            <td>${esc(t.method || '—')}</td>
+            <td class="tabular" style="font-weight:800;${t.direction==='in' ? 'color:var(--sage);' : 'color:var(--clay);'}">${t.direction==='in' ? '+' : '−'}${fmtNum(t.amount)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <h3>🗓️ سجل الورديات السابقة (${esc(branchName(uid))})</h3>
+    <table class="data-tbl">
+      <thead><tr><th>الفتح</th><th>الإغلاق</th><th>الافتتاحي</th><th>المتوقع</th><th>المعدود</th><th>الفرق</th></tr></thead>
+      <tbody>
+        ${shiftLogFor(uid).length === 0
+          ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:22px;">لا يوجد سجل ورديات سابقة بعد</td></tr>`
+          : shiftLogFor(uid).map(s => `
+          <tr>
+            <td class="tabular">${esc(s.openedAt || '—')}</td>
+            <td class="tabular">${esc(s.closedAt || '—')}</td>
+            <td class="tabular">${fmtNum(s.opening)}</td>
+            <td class="tabular">${fmtNum(s.expected)}</td>
+            <td class="tabular">${fmtNum(s.counted)}</td>
+            <td class="tabular" style="font-weight:800;${s.diff === 0 ? '' : (s.diff > 0 ? 'color:var(--sage);' : 'color:var(--clay);')}">${s.diff > 0 ? '+' : ''}${fmtNum(s.diff)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+}
+
+/* ---------- تقرير موحّد للإدارة (كل الفروع) ---------- */
+function renderHeadReport(){
+  const branches = warehouseUnits();
+  const rows = branches.map(b => {
+    const bal = cashboxBalance(b.id);
+    const sums = methodSummary(b.id);
+    return {b, bal, sums};
+  });
+  const totalBal = rows.reduce((s,r) => s + r.bal, 0);
+  const totalToday = rows.reduce((s,r) => s + r.sums.cash + r.sums.wallet + r.sums.credit, 0);
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>الصندوق — تقرير موحّد لكل الفروع</h2>
+      <div class="section-sub">صلاحية الإدارة: عرض كل الصناديق دون تنفيذ عمليات مباشرة عليها</div>
+    </div>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-val tabular">${fmtNum(totalBal)}</div><div class="stat-lbl">إجمالي الأرصدة النقدية</div></div>
+    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-val tabular">${fmtNum(totalToday)}</div><div class="stat-lbl">إجمالي مبيعات اليوم (كل الطرق)</div></div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <table class="data-tbl">
+      <thead><tr><th>الفرع</th><th>الرصيد النقدي</th><th>نقدي اليوم</th><th>محفظة اليوم</th><th>آجل اليوم</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+        <tr>
+          <td>${esc(r.b.name)}</td>
+          <td class="tabular" style="font-weight:800;">${fmtNum(r.bal)}</td>
+          <td class="tabular" style="color:var(--sage);">${fmtNum(r.sums.cash)}</td>
+          <td class="tabular" style="color:var(--gold-deep);">${fmtNum(r.sums.wallet)}</td>
+          <td class="tabular" style="color:var(--clay);">${fmtNum(r.sums.credit)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+}
+
+/* ---------- فتح / إغلاق وردية (شكلي) ---------- */
+function confirmOpenShift(){
+  const amt = Number(document.getElementById('os_amount').value) || 0;
+  openShift(uid, amt);
+  closeModal('openShiftModal');
+  showToast('تم فتح الوردية', '🟢');
+  render();
+}
+function openCloseShift(){
+  const expected = cashboxBalance(uid);
+  document.getElementById('closeShiftBody').innerHTML = `
+    <div class="row-sub" style="margin-bottom:10px;">الرصيد المتوقع بالنظام حاليًا: <b class="tabular">${fmtNum(expected)}</b> ل.س</div>
+    <div class="form-group">
+      <label>المبلغ المعدود فعليًا بالدرج</label>
+      <input type="number" id="cs_counted" value="${expected}" class="tabular" oninput="updCloseDiff()">
+    </div>
+    <div class="partial-prev" id="cs_diff">الفرق: <b class="tabular">0</b></div>
+    <button class="btn btn-gold btn-block" style="margin-top:10px;" onclick="confirmCloseShift()">✅ تأكيد الإغلاق</button>`;
+  openModal('closeShiftModal');
+}
+function updCloseDiff(){
+  const expected = cashboxBalance(uid);
+  const counted = Number(document.getElementById('cs_counted').value) || 0;
+  const diff = counted - expected;
+  const el = document.getElementById('cs_diff');
+  el.innerHTML = `الفرق: <b class="tabular" style="${diff===0?'':(diff>0?'color:var(--sage);':'color:var(--clay);')}">${diff>0?'+':''}${fmtNum(diff)}</b>`;
+}
+function confirmCloseShift(){
+  const counted = Number(document.getElementById('cs_counted').value) || 0;
+  const entry = closeShift(uid, counted);
+  closeModal('closeShiftModal');
+  showToast(entry.diff === 0 ? 'تم إغلاق الوردية — الصندوق مطابق تمامًا' : `تم إغلاق الوردية — الفرق ${fmtNum(entry.diff)} ل.س`, entry.diff === 0 ? '✅' : '⚠️');
+  render();
+}
+
+/* ---------- مصروف نقدي سريع ---------- */
+function confirmExpense(){
+  const desc = document.getElementById('ex_desc').value.trim();
+  const amount = Number(document.getElementById('ex_amount').value) || 0;
+  if(!desc){ showToast('أدخل وصف المصروف', '⚠️'); return; }
+  if(amount <= 0){ showToast('أدخل مبلغًا صحيحًا', '⚠️'); return; }
+  addCashboxTx(uid, {type:'مصروف', desc, amount, direction:'out', method:'نقدي', ref:''});
+  closeModal('expenseModal');
+  document.getElementById('ex_desc').value = ''; document.getElementById('ex_amount').value = '';
+  showToast('تم تسجيل المصروف', '✅');
+  render();
+}
+
+/* ---------- سحب / إيداع يدوي ---------- */
+function openManualTx(dir){
+  mtxDir = dir;
+  document.querySelectorAll('.mtx-dir').forEach(b => b.classList.toggle('active', b.dataset.d === dir));
+  document.getElementById('mtxTitle').innerText = dir === 'in' ? '⬇️ إيداع نقدي' : '⬆️ سحب نقدي';
+  document.getElementById('mtx_desc').value = '';
+  document.getElementById('mtx_amount').value = '';
+  openModal('manualTxModal');
+}
+function setManualDir(btn, dir){
+  mtxDir = dir;
+  document.querySelectorAll('.mtx-dir').forEach(b => b.classList.toggle('active', b === btn));
+  document.getElementById('mtxTitle').innerText = dir === 'in' ? '⬇️ إيداع نقدي' : '⬆️ سحب نقدي';
+}
+function confirmManualTx(){
+  const desc = document.getElementById('mtx_desc').value.trim();
+  const amount = Number(document.getElementById('mtx_amount').value) || 0;
+  if(!desc){ showToast('أدخل السبب / الملاحظة', '⚠️'); return; }
+  if(amount <= 0){ showToast('أدخل مبلغًا صحيحًا', '⚠️'); return; }
+  addCashboxTx(uid, {type: mtxDir === 'in' ? 'إيداع يدوي' : 'سحب يدوي', desc, amount, direction: mtxDir, method:'نقدي', ref:''});
+  closeModal('manualTxModal');
+  showToast('تم تسجيل الحركة', '✅');
+  render();
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(activeUnitId());
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+renderTopbar('الصندوق');
+renderShellNav('cashbox');
+render();
+renderNotifications();
+initRealtimeNotifs();
+</script>
+</body>
+</html>

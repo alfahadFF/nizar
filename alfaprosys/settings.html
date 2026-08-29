@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — الإعدادات</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+<style>
+.logo-preview{width:56px;height:56px;border-radius:10px;border:1.5px dashed var(--line-hi);object-fit:contain;background:var(--surface);}
+.seg-group{display:flex;gap:7px;flex-wrap:wrap;}
+.seg-btn{padding:8px 14px;border-radius:9px;border:1.5px solid var(--line);background:var(--surface);font-size:12px;font-weight:800;color:var(--ink-soft);cursor:pointer;}
+.seg-btn.active{background:var(--gold-strong);border-color:var(--gold-strong);color:#fff;}
+.seg-btn[disabled]{opacity:.45;cursor:not-allowed;}
+</style>
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة الإعدادات — حصرية للإدارة (u1)
+   النطاق الحالي (بعد مراجعة القرارات المتفق عليها):
+   - إعدادات فاتورة منفصلة لكل فرع (لوغو/اسم منشأة/هاتف/تذييل) — RECEIPT_BY_BRANCH بـ js/data.js
+   - عتبة تنبيه الصلاحية + عتبة المخزون المنخفض (تُستخدم بكل الشاشات عبر APP_SETTINGS)
+   - عملة (ل.س فقط) ولغة (عربي فقط) — بلا أي خيارات بديلة أو "قريبًا" معطّلة بقرار صريح (تُضعف الانطباع عن البرنامج)
+   - سقف نسبة الحسم (%) قابل للتعديل من الإدارة فقط — يُقيّد زر الحسم بشاشة البيع (pos.html) في كل الفروع
+   خارج النطاق حاليًا (بقرار صريح من المدير):
+   - إدارة الفروع/المستودعات (تبقى ثابتة بـ UNITS بـ js/data.js إلى ما بعد الربط بقاعدة البيانات)
+   - نظام مستخدمين برمز PIN دخول فعلي (مؤجّل لما بعد بناء قاعدة البيانات)
+   - النمط الليلي/المظهر (أُلغي نهائيًا — الثيم فاتح فقط، لا يُعرض أي قسم له بالإعدادات)
+   ===================================================================== */
+const uid = activeUnitId();
+let activeBranchTab = warehouseUnits()[0].id; // تبويب الفرع النشط بقسم إعدادات الفاتورة
+
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id; }
+
+function render(){
+  const branches = warehouseUnits();
+  const r = receiptFor(activeBranchTab);
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>⚙️ الإعدادات</h2>
+      <div class="section-sub">إعدادات عامة للنظام وإعدادات فاتورة كل فرع على حدة</div>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <h3>🧾 إعدادات فاتورة الفرع</h3>
+    <div class="cat-chips" style="margin-bottom:12px;">
+      ${branches.map(b => `<button class="cat-chip ${activeBranchTab===b.id?'active':''}" onclick="switchBranchTab('${b.id}')">${esc(b.name)}</button>`).join('')}
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;">
+      <img class="logo-preview" src="${r.logo || ''}" onerror="this.style.opacity=0;" alt="">
+      <div style="flex:1;">
+        <label style="display:block;font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px;">لوغو ${esc(branchName(activeBranchTab))}</label>
+        <input type="file" id="logoInput" accept="image/*" onchange="onLogoSelected(event)">
+        ${r.logo ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="clearLogo()">إزالة اللوغو</button>` : ''}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>اسم المنشأة (ترويسة الفاتورة) — ${esc(branchName(activeBranchTab))}</label>
+      <input type="text" id="s_storeName" value="${esc(r.storeName)}" placeholder="مثال: سوبرماركت النور">
+    </div>
+    <div class="form-group">
+      <label>رقم الهاتف الظاهر على الفاتورة</label>
+      <input type="text" id="s_phone" value="${esc(r.phone)}" placeholder="مثال: 011-2233445">
+    </div>
+    <div class="form-group">
+      <label>تذييل الفاتورة</label>
+      <input type="text" id="s_footer" value="${esc(r.footer)}" placeholder="مثال: شكرًا لتعاملكم معنا">
+    </div>
+    <button class="btn btn-gold btn-block" onclick="saveReceiptSettings()">💾 حفظ إعدادات فاتورة ${esc(branchName(activeBranchTab))}</button>
+    <div class="row-sub" style="margin-top:8px;">* كل فرع له إعدادات فاتورة مستقلة تمامًا عن الفرع الآخر — لا تظهر علامة النظام (AlfaProSys) على أي إيصال مطبوع بتاتًا.</div>
+  </div>
+
+  <div class="card-box">
+    <h3>⏳ تنبيهات المخزون والصلاحية</h3>
+    <div class="form-row2">
+      <div class="form-group">
+        <label>التنبيه قبل انتهاء الصلاحية بـ (يوم)</label>
+        <input type="number" id="s_expiryDays" min="1" value="${APP_SETTINGS.expiryAlertDays}" class="tabular">
+      </div>
+      <div class="form-group">
+        <label>عتبة "مخزون منخفض" (قطعة فأقل)</label>
+        <input type="number" id="s_lowStock" min="1" value="${APP_SETTINGS.lowStockThreshold}" class="tabular">
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:10px;">
+      <label>سقف نسبة الحسم (%) — يُقيّد زر الحسم بشاشة البيع في كل الفروع</label>
+      <input type="number" id="s_discountCap" min="0" max="100" value="${APP_SETTINGS.discountCapPercent}" class="tabular">
+    </div>
+    <button class="btn btn-gold btn-block" onclick="saveAppSettings()">💾 حفظ الإعدادات العامة</button>
+    <div class="row-sub" style="margin-top:8px;">* سقف نسبة الحسم قابل للتعديل من الإدارة فقط، ويُطبَّق فورًا على زر الحسم بشاشة البيع لكل الفروع.</div>
+  </div>
+
+    <div class="card-box">
+    <h3>🔒 رموز الدخول (PIN Codes) للفروع والإدارة</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">تعديل رمواز الدخول الخاصة بالحسابات لتقييد وصول الكاشير والإدارة</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:14px;">
+      <div class="form-group" style="margin:0;">
+        <label>🏢 الإدارة العامة (u1) — الرمز الحالي: <code style="color:var(--gold-dark);">${esc(getUnitPin('u1'))}</code></label>
+        <input type="text" id="pin_u1" value="${esc(getUnitPin('u1'))}" placeholder="1111" maxlength="6" class="tabular">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>🏬 سوبر ماركت أبو سارة (u2) — الرمز الحالي: <code style="color:var(--gold-dark);">${esc(getUnitPin('u2'))}</code></label>
+        <input type="text" id="pin_u2" value="${esc(getUnitPin('u2'))}" placeholder="2222" maxlength="6" class="tabular">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>🏬 أبو سارة 2 (u3) — الرمز الحالي: <code style="color:var(--gold-dark);">${esc(getUnitPin('u3'))}</code></label>
+        <input type="text" id="pin_u3" value="${esc(getUnitPin('u3'))}" placeholder="3333" maxlength="6" class="tabular">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-gold flex-1" onclick="saveUnitPinsFromSettings()">💾 حفظ رموز الدخول</button>
+      <button class="btn btn-ghost" onclick="resetUnitPinsToDefault()">🔄 استعادة الرموز الافتراضية</button>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <h3>💱 العملة</h3>
+    <div class="seg-group">
+      <button class="seg-btn active">الليرة السورية (ل.س)</button>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <h3>🌐 اللغة</h3>
+    <div class="seg-group">
+      <button class="seg-btn active">العربية</button>
+    </div>
+  </div>`;
+
+  const area = document.getElementById('contentArea'); if(area) area.innerHTML = html;
+}
+
+function switchBranchTab(id){ activeBranchTab = id; render(); }
+
+function saveUnitPinsFromSettings() {
+  const p1 = document.getElementById('pin_u1').value.trim();
+  const p2 = document.getElementById('pin_u2').value.trim();
+  const p3 = document.getElementById('pin_u3').value.trim();
+
+  if (p1) setUnitPin('u1', p1);
+  if (p2) setUnitPin('u2', p2);
+  if (p3) setUnitPin('u3', p3);
+
+  showToast('تم حفظ رموز الدخول PIN بنجاح', '🔒');
+  render();
+}
+
+function resetUnitPinsToDefault() {
+  setUnitPin('u1', '1111');
+  setUnitPin('u2', '2222');
+  setUnitPin('u3', '3333');
+  showToast('تمت استعادة رموز الدخول الافتراضية (1111, 2222, 3333)', '🔄');
+  render();
+}
+
+
+/* ---------- رفع اللوغو كـ Data URL محلي (بدون رفع لخادم — يُخزَّن داخل المتصفح حاليًا) ---------- */
+function onLogoSelected(e){
+  const file = e.target.files && e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    RECEIPT_BY_BRANCH[activeBranchTab].logo = ev.target.result;
+    persistReceipt();
+    showToast('تم تحديث اللوغو — لا تنسَ الحفظ لتثبيت باقي البيانات', '🖼️');
+    render();
+  };
+  reader.readAsDataURL(file);
+}
+function clearLogo(){
+  RECEIPT_BY_BRANCH[activeBranchTab].logo = null;
+  persistReceipt();
+  render();
+}
+function saveReceiptSettings(){
+  const r = RECEIPT_BY_BRANCH[activeBranchTab];
+  r.storeName = document.getElementById('s_storeName').value.trim();
+  r.phone = document.getElementById('s_phone').value.trim();
+  r.footer = document.getElementById('s_footer').value.trim();
+  persistReceipt();
+  showToast(`تم حفظ إعدادات فاتورة ${branchName(activeBranchTab)}`, '💾');
+}
+function saveAppSettings(){
+  const days = Number(document.getElementById('s_expiryDays').value) || 30;
+  const low = Number(document.getElementById('s_lowStock').value) || 15;
+  let cap = Number(document.getElementById('s_discountCap').value);
+  if(!Number.isFinite(cap) || cap < 0) cap = 0;
+  if(cap > 100) cap = 100;
+  APP_SETTINGS.expiryAlertDays = days;
+  APP_SETTINGS.lowStockThreshold = low;
+  APP_SETTINGS.discountCapPercent = cap;
+  persistAppSettings();
+  showToast('تم حفظ الإعدادات العامة', '💾');
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(uid);
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+if(enforceAdminOnly('شاشة الإعدادات')){
+  renderTopbar('الإعدادات');
+  renderShellNav('settings');
+  render();
+  refreshBellDot();
+}
+</script>
+</body>
+</html>

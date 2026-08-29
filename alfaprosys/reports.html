@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — التقارير</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+<style>
+/* الفاتورة الختامية المطبوعة — مستند A4 عادي (كشف حساب)، وليست إيصال 80مم حراري كباقي النظام */
+.stmt-doc{width:100%;max-width:640px;background:#fff;color:#000;padding:16px;font-family:'Almarai',sans-serif;font-size:12.5px;line-height:1.7;border-radius:6px;}
+.stmt-doc h2{font-family:'Changa';font-size:17px;margin-bottom:2px;}
+.stmt-doc .stmt-sub{color:#555;font-size:11.5px;margin-bottom:10px;}
+.stmt-doc table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:6px;}
+.stmt-doc th{text-align:right;border-bottom:1.5px solid #000;padding:4px 3px;font-size:11px;}
+.stmt-doc td{padding:4px 3px;border-bottom:1px dotted #ccc;}
+.stmt-doc .stmt-grand{font-family:'Changa';font-weight:800;font-size:15px;background:#f3ecd9;color:#8F6B22;padding:8px 10px;border-radius:8px;margin-top:10px;text-align:center;}
+.stmt-doc .stmt-sec-title{font-weight:800;margin-top:12px;margin-bottom:4px;font-size:12.5px;}
+@media print{
+  body.stmt-page #printArea{width:auto !important;margin:0 !important;padding:0 !important;}
+  body.stmt-page{background:#fff !important;}
+  @page{size:auto;margin:12mm;}
+}
+/* أدوات فلترة الفترة الزمنية أعلى شاشة التقارير */
+.rep-period{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+.rep-period input[type="date"]{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12px;background:var(--surface);}
+</style>
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- ============ الفاتورة الختامية المدمجة (معاينة + طباعة/نسخ) ============ -->
+<div class="modal-overlay" id="finalModal">
+  <div class="modal-card" style="max-width:640px;">
+    <div class="modal-head"><h3>🧾 الفاتورة الختامية المدمجة</h3><button class="modal-close" onclick="closeModal('finalModal')">✕</button></div>
+    <div id="finalDoc" style="max-height:60vh;overflow-y:auto;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn btn-outline btn-block" onclick="printFinalInvoice()">🖨️ طباعة / حفظ PDF</button>
+    </div>
+  </div>
+</div>
+<div id="printArea"></div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة التقارير — حصرية للإدارة (u1)
+   كل الأرقام محسوبة فعليًا من invoices/cashboxTx/auditLog الحقيقية ضمن الفترة المختارة
+   عدا: مقارنة "ساعات العمل" (branchWorkHours) وتوزيع weeklySalesByBranch — بيانات توضيحية معلنة بوضوح
+   ===================================================================== */
+const uid = activeUnitId();
+const branches = warehouseUnits();
+
+/* الفترة الافتراضية: آخر 7 أيام (شاملة اليوم) */
+function isoDaysAgo(n){
+  const d = new Date(); d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0,10);
+}
+let repFrom = isoDaysAgo(6);
+let repTo   = isoDaysAgo(0);
+
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id; }
+function invRemaining(iv){ return iv.remaining != null ? iv.remaining : (iv.total - iv.paid); }
+
+/* فواتير الفترة المختارة (غير الملغاة) — تُستخدم كأساس لكل أرقام هذه الشاشة */
+function periodInvoices(branch){
+  return invoices.filter(iv => {
+    if(iv.status === 'ملغاة') return false;
+    const d = (iv.date || '').slice(0,10);
+    if(d < repFrom || d > repTo) return false;
+    if(branch && iv.branch !== branch) return false;
+    return true;
+  });
+}
+
+/* مطابقة اسم الصنف بالفاتورة (نص حر) مع سجل المنتج الأساسي — لاستخراج التكلفة والتصنيف */
+function normName(s){ return String(s || '').replace(/\s+/g, '').replace(/[—-]/g, ''); }
+function matchProduct(name){
+  const n = normName(name);
+  return products.find(p => {
+    const short = normName((p.name.split('—')[0] || p.name) + (p.weight || ''));
+    const full  = normName(p.name + (p.weight || ''));
+    return n === short || n === full || n.includes(short) || short.includes(n);
+  }) || null;
+}
+
+/* ---------- تجميع الأصناف المباعة خلال الفترة (لكل الفروع معًا أو لفرع محدد) ---------- */
+function itemsSoldSummary(branch){
+  const map = {};
+  periodInvoices(branch).forEach(iv => {
+    iv.items.forEach(it => {
+      const key = it.name;
+      if(!map[key]) map[key] = {name: it.name, qty:0, revenue:0, unit:''};
+      map[key].qty += it.qty;
+      map[key].revenue += it.qty * it.price;
+      const p = matchProduct(it.name);
+      if(p && !map[key].unit) map[key].unit = p.saleUnit || '';
+    });
+  });
+  return Object.values(map).sort((a,b) => b.qty - a.qty);
+}
+
+/* ---------- الربح التقديري (الإيراد − التكلفة) — يعتمد على مطابقة اسم الصنف بسجل المنتج؛ يُتجاهل ما لا يُطابَق ---------- */
+function estimatedProfit(branch){
+  let revenue = 0, cost = 0;
+  periodInvoices(branch).forEach(iv => {
+    iv.items.forEach(it => {
+      revenue += it.qty * it.price;
+      const p = matchProduct(it.name);
+      if(p) cost += it.qty * p.cost;
+    });
+  });
+  return {revenue, cost, profit: revenue - cost};
+}
+
+/* ---------- مصاريف الفترة من صندوق كل فرع (حركات direction=out, type=مصروف) ---------- */
+function periodExpenses(branch){
+  return cashboxTx.filter(t => {
+    if(t.type !== 'مصروف' || t.direction !== 'out') return false;
+    const d = (t.time || '').slice(0,10);
+    if(d < repFrom || d > repTo) return false;
+    if(branch && t.branch !== branch) return false;
+    return true;
+  }).reduce((s,t) => s + t.amount, 0);
+}
+
+/* ---------- الديون (ذمم) المتبقية من فواتير الفترة لكل فرع ---------- */
+function periodDebt(branch){
+  return periodInvoices(branch).reduce((s,iv) => s + invRemaining(iv), 0);
+}
+
+/* ---------- عدد عمليات auditLog حسب النوع ضمن الفترة ---------- */
+function auditCounts(branch){
+  const list = auditLog.filter(a => {
+    const d = (a.time || '').slice(0,10);
+    if(d < repFrom || d > repTo) return false;
+    if(branch && a.branch !== branch) return false;
+    return true;
+  });
+  return {
+    edit:     list.filter(a => a.type === 'edit').length,
+    cancel:   list.filter(a => a.type === 'cancel').length,
+    exchange: list.filter(a => a.type === 'exchange').length,
+    return:   list.filter(a => a.type === 'return').length,
+  };
+}
+
+function barChart(data, keyLabel, keyVal){
+  const max = Math.max(1, ...data.map(d => d[keyVal]));
+  return `<div class="bar-chart">` + data.map(d => {
+    const h = Math.max(6, Math.round((d[keyVal] / max) * 100));
+    return `<div class="bar-col">
+      <div class="bar-val">${d[keyVal] >= 1000 ? (d[keyVal]/1000).toFixed(1) + 'k' : fmtNum(d[keyVal])}</div>
+      <div class="bar-fill" style="height:${h}px;"></div>
+      <div class="bar-lbl">${esc(d[keyLabel])}</div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+function setPeriod(kind){
+  if(kind === 'today'){ repFrom = isoDaysAgo(0); repTo = isoDaysAgo(0); }
+  else if(kind === 'week'){ repFrom = isoDaysAgo(6); repTo = isoDaysAgo(0); }
+  else if(kind === 'month'){ repFrom = isoDaysAgo(29); repTo = isoDaysAgo(0); }
+  render();
+}
+function applyCustomPeriod(){
+  const f = document.getElementById('rep_from').value;
+  const t = document.getElementById('rep_to').value;
+  if(!f || !t){ showToast('حدد بداية ونهاية الفترة', '⚠️'); return; }
+  if(f > t){ showToast('تاريخ البداية بعد النهاية!', '⚠️'); return; }
+  repFrom = f; repTo = t;
+  render();
+}
+
+function render(){
+  const allInv = periodInvoices();
+  const totalSales = allInv.reduce((s,iv) => s + iv.total, 0);
+  const invCount = allInv.length;
+  const totalDebt = periodDebt();
+  const totalExpenses = periodExpenses();
+  const profit = estimatedProfit();
+  const audit = auditCounts();
+  const topOverall = itemsSoldSummary().slice(0,5);
+  const avgInvoice = invCount ? Math.round(totalSales / invCount) : 0;
+
+  let html = `
+  <div class="section-head">
+    <div>
+      <h2>📊 التقارير</h2>
+      <div class="section-sub">كل الأرقام محسوبة من بيانات المبيعات والصندوق الفعلية ضمن الفترة المحددة</div>
+    </div>
+    <button class="btn btn-gold" onclick="openFinalInvoice()">🧾 الفاتورة الختامية المدمجة</button>
+  </div>
+
+  <div class="rep-period">
+    <button class="cat-chip" onclick="setPeriod('today')">اليوم</button>
+    <button class="cat-chip" onclick="setPeriod('week')">آخر 7 أيام</button>
+    <button class="cat-chip" onclick="setPeriod('month')">آخر 30 يوم</button>
+    <span style="width:1px;height:22px;background:var(--line);margin:0 2px;"></span>
+    <input type="date" id="rep_from" value="${repFrom}">
+    <span class="row-sub">إلى</span>
+    <input type="date" id="rep_to" value="${repTo}">
+    <button class="btn btn-outline btn-sm" onclick="applyCustomPeriod()">تطبيق</button>
+    <span class="row-sub" style="margin-inline-start:auto;">الفترة الحالية: <b class="tabular">${repFrom}</b> → <b class="tabular">${repTo}</b></span>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-val tabular">${fmtNum(totalSales)}</div><div class="stat-lbl">إجمالي المبيعات (ل.س)</div></div>
+    <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-val tabular">${fmtNum(invCount)}</div><div class="stat-lbl">عدد الفواتير</div></div>
+    <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-val tabular" style="color:${profit.profit >= 0 ? 'var(--sage)' : 'var(--clay)'}">${fmtNum(profit.profit)}</div><div class="stat-lbl">الربح التقديري (ل.س)</div></div>
+    <div class="stat-card"><div class="stat-icon">🧮</div><div class="stat-val tabular">${fmtNum(avgInvoice)}</div><div class="stat-lbl">متوسط قيمة الفاتورة</div></div>
+    <div class="stat-card"><div class="stat-icon">🧾💳</div><div class="stat-val tabular" style="color:${totalDebt > 0 ? 'var(--clay)' : 'inherit'}">${fmtNum(totalDebt)}</div><div class="stat-lbl">ذمم متبقية بالفترة</div></div>
+    <div class="stat-card"><div class="stat-icon">🧯</div><div class="stat-val tabular" style="color:var(--amber)">${fmtNum(totalExpenses)}</div><div class="stat-lbl">مصاريف نقدية بالفترة</div></div>
+    <div class="stat-card"><div class="stat-icon">✏️</div><div class="stat-val tabular">${fmtNum(audit.edit)}</div><div class="stat-lbl">مرات تعديل فواتير</div></div>
+    <div class="stat-card"><div class="stat-icon">❌</div><div class="stat-val tabular" style="color:var(--clay)">${fmtNum(audit.cancel)}</div><div class="stat-lbl">مرات إلغاء فواتير</div></div>
+  </div>
+
+  <div class="card-box">
+    <h3>🔁 عمليات الاستبدال والاسترجاع بالفترة</h3>
+    <div class="grid-stats" style="margin-bottom:0;">
+      <div class="stat-card"><div class="stat-icon">🔁</div><div class="stat-val tabular">${fmtNum(audit.exchange)}</div><div class="stat-lbl">عمليات استبدال صنف</div></div>
+      <div class="stat-card"><div class="stat-icon">↩️</div><div class="stat-val tabular">${fmtNum(audit.return)}</div><div class="stat-lbl">عمليات استرجاع صنف</div></div>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <h3>🏆 الأصناف الأكثر مبيعًا (كل الفروع)</h3>
+    ${topOverall.length === 0 ? `<div class="row-sub">لا توجد مبيعات مسجّلة بهذه الفترة.</div>` : ''}
+    ${topOverall.map((it,i) => `
+      <div class="list-row"><div class="row-main"><div class="row-title">${i+1}. ${esc(it.name)}</div><div class="row-sub tabular">الكمية: ${fmtNum(it.qty)} ${esc(it.unit)} — الإيراد: ${fmtNum(it.revenue)} ل.س</div></div></div>`).join('')}
+  </div>
+
+  <div class="card-box">
+    <h3>🏬 مقارنة شاملة بين الفروع</h3>
+    <div class="tbl-scroll">
+      <table class="data-tbl">
+        <thead><tr><th>الفرع</th><th>ساعات العمل*</th><th>مبيعات الفترة</th><th>عدد الفواتير</th><th>ذمم متبقية</th><th>مصاريف نقدية</th></tr></thead>
+        <tbody>
+          ${branches.map(b => {
+            const binv = periodInvoices(b.id);
+            const bSales = binv.reduce((s,iv) => s + iv.total, 0);
+            const bDebt = periodDebt(b.id);
+            const bExp = periodExpenses(b.id);
+            const wh = branchWorkHours[b.id] || {label:'—'};
+            return `<tr>
+              <td>${esc(b.name)}</td>
+              <td class="tabular">${esc(wh.label)}</td>
+              <td class="tabular" style="font-weight:800;">${fmtNum(bSales)}</td>
+              <td class="tabular">${fmtNum(binv.length)}</td>
+              <td class="tabular" style="${bDebt>0?'color:var(--clay);':''}">${fmtNum(bDebt)}</td>
+              <td class="tabular" style="color:var(--amber);">${fmtNum(bExp)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="row-sub" style="margin-top:6px;">* ساعات العمل بيانات توضيحية مبدئية (لا يوجد نظام حضور/دخول فعلي بكلمة مرور بعد) — ستُستبدل ببيانات حقيقية عند إضافته لاحقًا</div>
+  </div>
+
+  <div class="card-box">
+    <h3>📈 مبيعات آخر 7 أيام — لكل فرع (توضيحي)</h3>
+    ${branches.map(b => `
+      <div style="margin-bottom:14px;">
+        <div class="row-title" style="margin-bottom:4px;">${esc(b.name)}</div>
+        ${barChart(weeklySalesByBranch[b.id] || [], 'd', 'v')}
+      </div>`).join('')}
+    <div class="row-sub">* توزيع توضيحي لأداء الفرعين على أيام الأسبوع، سيُستبدل تلقائيًا بأرقام فعلية تراكمية مع استمرار الاستخدام</div>
+  </div>
+
+  <div class="card-box">
+    <h3>🥇 الأصناف الأكثر مبيعًا لكل فرع (أعلى 3)</h3>
+    <div style="display:grid;grid-template-columns:1fr;gap:14px;">
+      ${branches.map(b => {
+        const top3 = itemsSoldSummary(b.id).slice(0,3);
+        return `<div>
+          <div class="row-title" style="margin-bottom:6px;">${esc(b.name)}</div>
+          ${top3.length === 0 ? `<div class="row-sub">لا توجد مبيعات بهذه الفترة.</div>` :
+            top3.map((it,i) => `<div class="list-row"><div class="row-main"><div class="row-title">${i+1}. ${esc(it.name)}</div><div class="row-sub tabular">الكمية: ${fmtNum(it.qty)} ${esc(it.unit)}</div></div></div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+
+  const area = document.getElementById('contentArea'); if(area) area.innerHTML = html;
+}
+
+/* =====================================================================
+   الفاتورة الختامية المدمجة — ملخص كل المبيعات (كل الأصناف المباعة مجمّعة بالكمية) لكل فرع + إجمالي عام
+   ===================================================================== */
+function openFinalInvoice(){
+  document.getElementById('finalDoc').innerHTML = finalInvoiceHtml();
+  openModal('finalModal');
+}
+function finalInvoiceHtml(){
+  const grand = itemsSoldSummary();
+  const grandTotal = grand.reduce((s,it) => s + it.revenue, 0);
+
+  let html = `<div class="stmt-doc" id="finalDocInner">
+    <h2>الفاتورة الختامية المدمجة — كل الفروع</h2>
+    <div class="stmt-sub">الفترة: ${repFrom} → ${repTo}</div>`;
+
+  branches.forEach(b => {
+    const items = itemsSoldSummary(b.id);
+    const branchTotal = items.reduce((s,it) => s + it.revenue, 0);
+    html += `<div class="stmt-sec-title">${esc(b.name)}</div>`;
+    if(items.length === 0){
+      html += `<div class="row-sub">لا توجد مبيعات بهذه الفترة.</div>`;
+    } else {
+      html += `<table><thead><tr><th>الصنف</th><th>الكمية</th><th>الإيراد</th></tr></thead><tbody>
+        ${items.map(it => `<tr><td>${esc(it.name)}</td><td class="tabular">${fmtNum(it.qty)} ${esc(it.unit)}</td><td class="tabular">${fmtNum(it.revenue)}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="row-sub" style="text-align:left;margin-top:4px;font-weight:800;">إجمالي ${esc(b.name)}: <span class="tabular">${fmtNum(branchTotal)}</span> ل.س</div>`;
+    }
+  });
+
+  html += `<div class="stmt-sec-title">📦 ملخص عام — كل الأصناف مجمّعة (كل الفروع)</div>
+    <table><thead><tr><th>الصنف</th><th>الكمية الإجمالية</th><th>الإيراد</th></tr></thead><tbody>
+      ${grand.map(it => `<tr><td>${esc(it.name)}</td><td class="tabular">${fmtNum(it.qty)} ${esc(it.unit)}</td><td class="tabular">${fmtNum(it.revenue)}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="stmt-grand">الإجمالي العام لكل الفروع: ${fmtNum(grandTotal)} ل.س</div>
+  </div>`;
+  return html;
+}
+function printFinalInvoice(){
+  document.getElementById('printArea').innerHTML = finalInvoiceHtml();
+  document.body.classList.add('stmt-page');
+  window.print();
+  setTimeout(() => document.body.classList.remove('stmt-page'), 500);
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(uid);
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+if(enforceAdminOnly('التقارير')){
+  renderTopbar('التقارير');
+  renderShellNav('reports');
+  render();
+  refreshBellDot();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — لوحة التحكم</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   لوحة التحكم — شاشة الدخول الافتراضية للإدارة (u1) فقط
+   نظرة عامة سريعة على أداء اليوم عبر كل الفروع، مبنية على بيانات حقيقية من js/data.js
+   (وليست أرقامًا تجريبية ثابتة كما في العرض المصدري) — عدا الرسم البياني الأسبوعي وسجل النشاط
+   اللذين لا تتوفر لهما بيانات حقيقية متراكمة بعد فيُستخدم seed توضيحي (weeklySales/activityLog) مؤقتًا
+   ===================================================================== */
+const uid = activeUnitId();
+const branches = warehouseUnits(); // الفروع الفعلية صاحبة المخزون والمبيعات (u2, u3) — بدون "الإدارة"
+
+function todayStr(){ return nowStr().slice(0,10); }
+
+function todaysInvoices(){
+  const t = todayStr();
+  return invoices.filter(iv => iv.status !== 'ملغاة' && (iv.date || '').slice(0,10) === t);
+}
+
+function lowStockCount(){
+  const threshold = APP_SETTINGS.lowStockThreshold || 15;
+  return products.filter(p => branches.reduce((s,b) => s + (p.stock[b.id] || 0), 0) <= threshold).length;
+}
+
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id; }
+
+/* أداء كل فرع اليوم (من فواتير اليوم الفعلية) — تُستخدم بدل branchPerf التجريبية حال توفّر بيانات اليوم */
+function branchTodayPerf(){
+  const t = todayStr();
+  return branches.map(b => ({
+    name: b.name,
+    v: invoices.filter(iv => iv.branch === b.id && iv.status !== 'ملغاة' && (iv.date || '').slice(0,10) === t)
+               .reduce((s,iv) => s + iv.total, 0)
+  }));
+}
+
+function barChart(data, keyLabel, keyVal){
+  const max = Math.max(1, ...data.map(d => d[keyVal]));
+  return `<div class="bar-chart">` + data.map(d => {
+    const h = Math.max(6, Math.round((d[keyVal] / max) * 100));
+    return `<div class="bar-col">
+      <div class="bar-val">${d[keyVal] >= 1000 ? (d[keyVal]/1000).toFixed(1) + 'k' : fmtNum(d[keyVal])}</div>
+      <div class="bar-fill" style="height:${h}px;"></div>
+      <div class="bar-lbl">${esc(d[keyLabel])}</div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+function render(){
+  const todays = todaysInvoices();
+  const salesToday = todays.reduce((s,iv) => s + iv.total, 0);
+  const invCount = todays.length;
+  const exp = expiryList();
+  const lowCount = lowStockCount();
+  const perf = branchTodayPerf();
+  const hasTodayPerf = perf.some(p => p.v > 0);
+
+  let html = `
+  <div class="section-head">
+    <div>
+      <h2>مرحبًا 👋</h2>
+      <div class="section-sub">نظرة شاملة على أداء اليوم في كل الفروع</div>
+    </div>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card">
+      <div class="stat-icon">💰</div>
+      <div class="stat-val tabular">${fmtNum(salesToday)}</div>
+      <div class="stat-lbl">مبيعات اليوم (ل.س)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🧾</div>
+      <div class="stat-val tabular">${fmtNum(invCount)}</div>
+      <div class="stat-lbl">فاتورة اليوم</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">⚠️</div>
+      <div class="stat-val tabular" style="color:${exp.length ? 'var(--amber)' : 'inherit'}">${fmtNum(exp.length)}</div>
+      <div class="stat-lbl">صنف قارب على الانتهاء</div>
+      ${exp.length ? `<span class="stat-delta down">راجع الآن</span>` : ''}
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">📉</div>
+      <div class="stat-val tabular" style="color:${lowCount ? 'var(--clay)' : 'inherit'}">${fmtNum(lowCount)}</div>
+      <div class="stat-lbl">أصناف بمخزون منخفض</div>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <h3>⏳ تنبيهات الصلاحية العاجلة</h3>
+    ${exp.length === 0 ? `<div class="row-sub">لا توجد أصناف قريبة من الانتهاء حاليًا.</div>` : ''}
+    ${exp.slice(0,3).map(p => {
+      const badge = p.days < 0 ? `<span class="badge badge-clay">منتهي</span>` : `<span class="badge badge-amber tabular">${p.days} يوم متبقي</span>`;
+      return `<div class="list-row"><div class="row-main"><div class="row-title">${esc(p.name)}</div><div class="row-sub">${esc(p.expiry)}</div></div>${badge}</div>`;
+    }).join('')}
+    ${exp.length > 0 ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="location.href='inventory.html?unit=${uid}'">عرض الكل بالمخزون</button>` : ''}
+  </div>
+
+  <div class="card-box">
+    <h3>📈 مبيعات آخر 7 أيام (توضيحي)</h3>
+    ${barChart(weeklySales, 'd', 'v')}
+    <div class="row-sub" style="margin-top:6px;">* بيانات توضيحية مبدئية ستُستبدل بأرقام فعلية تراكمية تلقائيًا مع استمرار العمل بالنظام</div>
+  </div>
+
+  <div class="card-box">
+    <h3>🏬 أداء الفروع ${hasTodayPerf ? 'اليوم' : '(توضيحي)'}</h3>
+    ${(hasTodayPerf ? perf : branchPerf).map(b => `
+      <div class="list-row"><div class="row-main"><div class="row-title">${esc(b.name)}</div></div><div class="row-val tabular" style="font-weight:800;">${fmtNum(b.v)}</div></div>`).join('')}
+    ${!hasTodayPerf ? `<div class="row-sub" style="margin-top:6px;">* لا توجد مبيعات مسجّلة اليوم بعد — الأرقام أعلاه توضيحية</div>` : ''}
+  </div>
+
+  <div class="card-box">
+    <h3>📜 آخر نشاط (توضيحي)</h3>
+    ${activityLog.slice(0,4).map(a => `
+      <div class="list-row"><div class="row-main"><div class="row-title">${esc(a.action)}</div><div class="row-sub">${esc(a.who)} — ${esc(a.time)}</div></div></div>`).join('')}
+  </div>`;
+
+  const area = document.getElementById('contentArea'); if(area) area.innerHTML = html;
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(uid);
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+if(enforceAdminOnly('لوحة التحكم')){
+  renderTopbar('لوحة التحكم');
+  renderShellNav('dashboard');
+  render();
+  refreshBellDot();
+}
+</script>
+</body>
+</html>

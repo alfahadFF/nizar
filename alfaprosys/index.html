@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — لأنظمة المحاسبة وإدارة المستودعات</title>
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============ شاشة اختيار الوحدة / الفرع ============ -->
+<div id="loginScreen">
+  <div class="bg-streaks">
+    <span style="width:220px;top:10%;right:-40px;"></span>
+    <span style="width:160px;top:35%;right:-80px;"></span>
+    <span style="width:280px;top:70%;right:-30px;"></span>
+    <span style="width:140px;top:88%;right:-100px;"></span>
+  </div>
+
+  <div class="login-hero">
+    <div class="streak-mark streak-lg"><span></span><span></span><span></span></div>
+    <h1 style="font-family:'Changa',sans-serif;font-size:32px;font-weight:800;color:var(--text);">AlfaProSys</h1>
+    <p style="color:var(--muted);font-weight:700;font-size:14px;margin-top:4px;">لأنظمة المحاسبة وإدارة المستودعات ونقاط البيع</p>
+    <span class="login-badge" style="margin-top:12px;">⚡ اختر الفرع أو وحدة العمل للبدء</span>
+  </div>
+
+  <div class="role-grid" id="unitGrid" style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:380px;position:relative;z-index:2;"></div>
+
+  <div class="login-footer" style="margin-top:24px;color:var(--muted-soft);font-size:12px;">مرحباً بك في AlfaProSys — اضغط على الفرع للدخول</div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+
+function renderUnitCards() {
+  const grid = document.getElementById('unitGrid');
+  if (!grid) return;
+  const list = (typeof UNITS !== 'undefined' && UNITS.length > 0) ? UNITS : [
+    {id:'u1', name:'الإدارة العامة', type:'head'},
+    {id:'u2', name:'سوبر ماركت أبو سارة', type:'branch'},
+    {id:'u3', name:'أبو سارة 2', type:'branch'}
+  ];
+  
+  grid.innerHTML = list.map(u => `
+    <div class="role-card" onclick="loginUnit('${u.id}')" style="cursor:pointer;padding:16px 18px;background:var(--card);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-sm);transition:all .2s ease;">
+      <div class="role-icon" style="font-size:30px;line-height:1;">${u.type === 'head' ? '🏢' : '🏬'}</div>
+      <div style="text-align:right;">
+        <div class="role-title" style="font-family:'Changa',sans-serif;font-size:15px;font-weight:700;color:var(--gold-dark);">${esc(u.name)}</div>
+        <div class="role-desc" style="font-size:12px;color:var(--muted);margin-top:3px;">${u.type === 'head' ? 'لوحة التحكم والضوابط الإدارية العامة' : 'شاشة نقطة البيع (الكاشير) والمخزون المباشر'}</div>
+      </div>
+    </div>`).join('');
+}
+
+function loginUnit(uid){
+  const list = (typeof UNITS !== 'undefined') ? UNITS : [];
+  const u = list.find(x => x.id === uid) || {id: uid, type: uid === 'u1' ? 'head' : 'branch'};
+  
+  if (typeof promptUnitPin === 'function') {
+    promptUnitPin(uid, (validUid) => {
+      try { localStorage.setItem('aps_active_unit', validUid); } catch(e){}
+      if (u.type === 'head') {
+        location.href = 'dashboard.html?unit=' + validUid;
+      } else {
+        location.href = 'pos.html?unit=' + validUid;
+      }
+    });
+    return;
+  }
+
+  try { localStorage.setItem('aps_active_unit', uid); } catch(e){}
+  
+  if(u.type === 'head'){
+    location.href = 'dashboard.html?unit=' + u.id;
+  } else {
+    location.href = 'pos.html?unit=' + u.id;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  renderUnitCards();
+});
+renderUnitCards();
+</script>
+</body>
+</html>

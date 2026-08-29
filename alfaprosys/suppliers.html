@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — الموردون</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة إضافة مورد ============ -->
+<div class="modal-overlay" id="supModal">
+  <div class="modal-card" style="max-width:480px;">
+    <div class="modal-head"><h3>➕ إضافة مورد</h3><button class="modal-close" onclick="closeModal('supModal')">✕</button></div>
+    <div class="form-group">
+      <label>اسم المورد *</label>
+      <input type="text" id="ns_name" placeholder="اسم الشركة / المورد">
+    </div>
+    <div class="form-row2">
+      <div class="form-group">
+        <label>رقم الهاتف</label>
+        <input type="tel" id="ns_phone" placeholder="رقم الهاتف" class="tabular">
+      </div>
+      <div class="form-group">
+        <label>التصنيف</label>
+        <input type="text" id="ns_category" placeholder="مثال: مواد أساسية">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>الرصيد الحالي (ما تدين به المنشأة له، إن وُجد)</label>
+      <input type="number" id="ns_balance" value="0" class="tabular">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('supModal')">إلغاء</button>
+      <button class="btn btn-gold btn-block" onclick="saveNewSupplier()">💾 حفظ المورد</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ نافذة تسديد دفعة لمورد ============ -->
+<div class="modal-overlay" id="paySupModal">
+  <div class="modal-card" style="max-width:460px;">
+    <div class="modal-head"><h3 id="paySupTitle">💳 تسديد دفعة لمورد</h3><button class="modal-close" onclick="closeModal('paySupModal')">✕</button></div>
+    <div id="paySupBody"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة سجل فواتير الشراء والدفعات ============ -->
+<div class="modal-overlay" id="supInvModal">
+  <div class="modal-card" style="max-width:560px;">
+    <div class="modal-head"><h3 id="supInvTitle">🧾 فواتير الشراء</h3><button class="modal-close" onclick="closeModal('supInvModal')">✕</button></div>
+    <div id="supInvBody"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة فاتورة شراء جديدة ============ -->
+<div class="modal-overlay" id="purchaseModal">
+  <div class="modal-card" style="max-width:640px;">
+    <div class="modal-head"><h3>🧾 فاتورة شراء جديدة</h3><button class="modal-close" onclick="closeModal('purchaseModal')">✕</button></div>
+    <div id="purchaseForm"></div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة الموردون — الذمم التي علينا لهم، تسديد الدفعات، وفواتير الشراء
+   فاتورة الشراء تُحدّث مخزون الفرع المستلِم تلقائيًا (نفس منطق شاشة المخزون)
+   وتُحدّث ذمة المورد وصندوق الفرع (إن وُجد دفع نقدي) لحظيًا
+   ===================================================================== */
+let supSearch = '';
+let supFilter = 'all'; // all | debt | clear
+let paySupTarget = null;
+
+/* ---- حالة نموذج فاتورة الشراء الجديدة ---- */
+let pInvBranch = activeUnitId();
+let pInvSupplier = null;
+let pInvItems = []; // [{productId, name, qty, cost}]
+let pInvPayMethod = 'credit'; // cash | partial | credit
+
+function filteredSuppliers(){
+  return suppliers.filter(s => {
+    if(supFilter === 'debt' && !(s.balance > 0)) return false;
+    if(supFilter === 'clear' && s.balance > 0) return false;
+    if(supSearch){
+      const hay = [s.name, s.phone, s.category].join(' ');
+      if(!fuzzyIncludes(hay, supSearch)) return false;
+    }
+    return true;
+  }).sort((a,b) => (b.balance||0) - (a.balance||0));
+}
+
+function render(){
+  const totalBalance = suppliers.reduce((s,x) => s + (x.balance||0), 0);
+  const withDebt = suppliers.filter(s => s.balance > 0).length;
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>الموردون</h2>
+      <div class="section-sub">إجمالي الموردين: ${fmtNum(suppliers.length)} — إجمالي الذمم عليهم لنا: <b class="tabular">${fmt(totalBalance)}</b></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-outline" onclick="openAddSupplier()">➕ إضافة مورد</button>
+      <button class="btn btn-gold" onclick="openPurchaseModal()">🧾 فاتورة شراء جديدة</button>
+    </div>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">🚚</div><div class="stat-val tabular">${fmtNum(suppliers.length)}</div><div class="stat-lbl">إجمالي الموردين</div></div>
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-val tabular" style="color:var(--clay)">${fmtNum(withDebt)}</div><div class="stat-lbl">عليهم ذمم لنا (مستحقة عليها)</div></div>
+    <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-val tabular">${fmt(totalBalance)}</div><div class="stat-lbl">إجمالي الذمم المستحقة للموردين</div></div>
+  </div>
+
+  <div class="card-box">
+    <div class="search-box" style="min-height:42px;">
+      <span>🔍</span>
+      <input type="text" placeholder="بحث بالاسم / الهاتف / التصنيف..." value="${esc(supSearch)}" oninput="supSearch=this.value;renderSupRows()">
+    </div>
+    <div class="cat-chips" style="margin-top:10px;margin-bottom:0;">
+      <button class="cat-chip ${supFilter==='all'?'active':''}" onclick="setSupFilter('all')">الكل</button>
+      <button class="cat-chip ${supFilter==='debt'?'active':''}" onclick="setSupFilter('debt')">عليهم ذمم لنا</button>
+      <button class="cat-chip ${supFilter==='clear'?'active':''}" onclick="setSupFilter('clear')">لا ذمم</button>
+    </div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <table class="data-tbl">
+      <thead><tr>
+        <th>الاسم</th><th>الهاتف</th><th>التصنيف</th><th>الرصيد المستحق</th><th>فواتير الشراء</th><th></th>
+      </tr></thead>
+      <tbody id="supRows"></tbody>
+    </table>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+  renderSupRows();
+}
+function setSupFilter(f){ supFilter = f; render(); }
+
+function renderSupRows(){
+  const rowsEl = document.getElementById('supRows');
+  if(!rowsEl) return;
+  const list = filteredSuppliers();
+  if(list.length === 0){
+    rowsEl.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:22px;">لا يوجد موردون مطابقون</td></tr>`;
+    return;
+  }
+  rowsEl.innerHTML = list.map(s => `
+    <tr>
+      <td><div class="row-title" style="margin-bottom:0;">${esc(s.name)}</div></td>
+      <td class="tabular">${esc(s.phone || '—')}</td>
+      <td>${esc(s.category || '—')}</td>
+      <td class="tabular" style="font-weight:800;${s.balance>0?'color:var(--clay);':''}">${fmtNum(s.balance||0)}</td>
+      <td>
+        <button class="btn btn-outline" style="padding:6px 10px;font-size:11px;" onclick="openSupInvoices('${s.id}')">
+          🧾 ${fmtNum((s.invoiceIds||[]).length)}
+        </button>
+      </td>
+      <td>
+        <button class="btn btn-gold" style="padding:6px 10px;font-size:11px;" ${s.balance<=0?'disabled style="opacity:.4;"':''} onclick="openPaySupModal('${s.id}')">💳 تسديد دفعة</button>
+      </td>
+    </tr>`).join('');
+}
+
+/* ---------- إضافة مورد ---------- */
+function openAddSupplier(){
+  document.getElementById('ns_name').value = '';
+  document.getElementById('ns_phone').value = '';
+  document.getElementById('ns_category').value = '';
+  document.getElementById('ns_balance').value = '0';
+  openModal('supModal');
+}
+function saveNewSupplier(){
+  const name = document.getElementById('ns_name').value.trim();
+  if(!name){ showToast('أدخل اسم المورد', '⚠️'); return; }
+  const phone = document.getElementById('ns_phone').value.trim();
+  const category = document.getElementById('ns_category').value.trim();
+  const balance = Number(document.getElementById('ns_balance').value) || 0;
+  addSupplierManual({id:'s' + Date.now(), name, phone, category, balance, payments:[], invoiceIds:[]});
+  closeModal('supModal');
+  showToast('تمت إضافة المورد', '✅');
+  render();
+}
+
+/* ---------- تسديد دفعة لمورد ---------- */
+function openPaySupModal(id){
+  const s = suppliers.find(x => x.id === id);
+  if(!s) return;
+  paySupTarget = id;
+  document.getElementById('paySupTitle').innerText = '💳 تسديد دفعة — ' + s.name;
+  document.getElementById('paySupBody').innerHTML = `
+    <div class="row-sub" style="margin-bottom:10px;">الرصيد المستحق حاليًا: <b class="tabular" style="color:var(--clay)">${fmt(s.balance)}</b></div>
+    <div class="form-group">
+      <label>المبلغ المدفوع</label>
+      <input type="number" id="ps_amount" value="${s.balance}" max="${s.balance}" min="1" class="tabular" oninput="updatePaySupPreview()">
+    </div>
+    <div class="seg" style="margin-bottom:10px;">
+      <button class="ps-method active" data-m="cash" onclick="setPaySupMethod(this,'cash')">💵 نقدًا</button>
+      <button class="ps-method" data-m="wallet" onclick="setPaySupMethod(this,'wallet')">📱 محفظة</button>
+    </div>
+    <div class="form-group" id="ps_opnoWrap" style="display:none;">
+      <label>رقم عملية التحويل</label>
+      <input type="text" id="ps_opno" placeholder="رقم عملية التحويل" class="tabular">
+    </div>
+    <div class="pay-summary-mini" style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;">
+      <span>الباقي بعد هذه الدفعة</span>
+      <b class="tabular" id="ps_remaining">${fmt(0)}</b>
+    </div>
+    <button class="btn btn-gold btn-block" onclick="confirmPaySupplier()">✅ تأكيد التسديد</button>`;
+  document.getElementById('paySupBody').dataset.method = 'cash';
+  openModal('paySupModal');
+  updatePaySupPreview();
+}
+function setPaySupMethod(btn, m){
+  document.querySelectorAll('.ps-method').forEach(b => b.classList.toggle('active', b === btn));
+  document.getElementById('paySupBody').dataset.method = m;
+  document.getElementById('ps_opnoWrap').style.display = m === 'wallet' ? 'block' : 'none';
+}
+function updatePaySupPreview(){
+  const s = suppliers.find(x => x.id === paySupTarget);
+  if(!s) return;
+  let a = Number(document.getElementById('ps_amount').value) || 0;
+  a = Math.max(0, Math.min(a, s.balance));
+  document.getElementById('ps_remaining').innerText = fmt(s.balance - a);
+}
+function confirmPaySupplier(){
+  const s = suppliers.find(x => x.id === paySupTarget);
+  if(!s) return;
+  const method = document.getElementById('paySupBody').dataset.method;
+  let amount = Number(document.getElementById('ps_amount').value) || 0;
+  amount = Math.max(0, Math.min(amount, s.balance));
+  if(amount <= 0){ showToast('أدخل مبلغًا صحيحًا', '⚠️'); return; }
+  const opNo = method === 'wallet' ? document.getElementById('ps_opno').value.trim() : '';
+  if(method === 'wallet' && !opNo){ showToast('أدخل رقم عملية التحويل', '⚠️'); return; }
+  addSupplierPayment(s.id, amount, method === 'wallet' ? 'محفظة' : 'نقدي', opNo, activeUnitId());
+  logAudit('supplier_payment', activeUnitId(), '', `تسديد دفعة ${fmtNum(amount)} ل.س إلى المورد ${s.name}`);
+  if (typeof saveSupplierToSupabase === 'function') saveSupplierToSupabase(s);
+  closeModal('paySupModal');
+  showToast(`تم تسجيل دفعة ${fmtNum(amount)} ل.س — الباقي ${fmtNum(s.balance)} ل.س`, '✅');
+  render();
+}
+
+/* ---------- فواتير الشراء وسجل الدفعات ---------- */
+function openSupInvoices(id){
+  const s = suppliers.find(x => x.id === id);
+  if(!s) return;
+  document.getElementById('supInvTitle').innerText = '🧾 فواتير الشراء — ' + s.name;
+  const ids = s.invoiceIds || [];
+  const invs = ids.map(iid => purchases.find(i => i.id === iid)).filter(Boolean);
+  let html = '';
+  if(invs.length === 0){
+    html = `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد فواتير شراء مسجّلة من هذا المورد بعد</div>`;
+  } else {
+    html = invs.map(inv => `
+      <div class="list-row">
+        <div class="row-main">
+          <div class="row-title">فاتورة شراء #${esc(inv.id)} — ${esc(branchName(inv.branch))}</div>
+          <div class="row-sub tabular">${esc(inv.date)} • الإجمالي ${fmtNum(inv.total)} • المدفوع ${fmtNum(inv.paid)} • المتبقي ${fmtNum(inv.remaining||0)}</div>
+        </div>
+      </div>`).join('');
+  }
+  if((s.payments||[]).length > 0){
+    html += `<h3 style="margin-top:14px;">💳 سجل الدفعات</h3>`;
+    html += s.payments.map(p => `
+      <div class="list-row">
+        <div class="row-main">
+          <div class="row-title">دفعة ${fmtNum(p.amount)} ل.س — ${esc(p.method)}${p.opNo ? ' (رقم العملية: ' + esc(p.opNo) + ')' : ''}</div>
+          <div class="row-sub tabular">${esc(p.date)}</div>
+        </div>
+      </div>`).join('');
+  }
+  document.getElementById('supInvBody').innerHTML = html;
+  openModal('supInvModal');
+}
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id; }
+
+/* ---------- فاتورة شراء جديدة ---------- */
+function onPurchaseSupplierChange(el){
+  pInvSupplier = el ? el.value : '';
+  const wrap = document.getElementById('pf_supplierOtherWrap');
+  if(wrap){
+    wrap.style.display = pInvSupplier === '__other__' ? 'block' : 'none';
+  }
+}
+
+function openPurchaseModal(){
+  pInvBranch = activeUnitId();
+  pInvSupplier = suppliers[0] ? suppliers[0].id : null;
+  pInvItems = [];
+  pInvPayMethod = 'credit';
+  renderPurchaseForm();
+  openModal('purchaseModal');
+}
+function purchaseTotal(){ return pInvItems.reduce((s,it) => s + it.qty * it.cost, 0); }
+function renderPurchaseForm(){
+  const WH = warehouseUnits();
+  const total = purchaseTotal();
+  document.getElementById('purchaseForm').innerHTML = `
+    <div class="form-row2">
+      <div class="form-group">
+        <label>المورد *</label>
+        <select id="pf_supplier" onchange="onPurchaseSupplierChange(this)">
+          <option value="">— اختر المورد —</option>
+          ${suppliers.map(s => `<option value="${s.id}" ${s.id===pInvSupplier?'selected':''}>${esc(s.name)}</option>`).join('')}
+          <option value="__other__" ${pInvSupplier==='__other__'?'selected':''}>➕ إضافة مورد جديد (أدخله يدويًا)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>فرع استلام البضاعة *</label>
+        <select id="pf_branch" onchange="pInvBranch=this.value">
+          ${WH.map(u => `<option value="${u.id}" ${u.id===pInvBranch?'selected':''}>${esc(u.name)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group" id="pf_supplierOtherWrap" style="display:${pInvSupplier==='__other__'?'block':'none'};margin-bottom:12px;">
+      <label style="color:var(--gold-dark);font-weight:700;">اسم المورد / الشركة الجديدة *</label>
+      <input type="text" id="pf_supplierOther" placeholder="أدخل اسم المورد أو الشركة الجديدة...">
+    </div>
+
+    <div class="card-box" style="background:var(--bg);margin-bottom:10px;">
+      <h3 style="margin-bottom:8px;">➕ إضافة صنف للفاتورة</h3>
+      <div class="form-row2">
+        <div class="form-group">
+          <label>الصنف</label>
+          <select id="pf_product">
+            ${products.map(p => `<option value="${p.id}">${esc(p.name)}${p.weight ? ' ('+esc(p.weight)+')' : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>الكمية</label>
+          <input type="number" id="pf_qty" min="1" value="1" class="tabular">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>سعر التكلفة للوحدة</label>
+        <input type="number" id="pf_cost" min="0" class="tabular" placeholder="0">
+      </div>
+      <button class="btn btn-outline btn-block" onclick="addPurchaseItem()">➕ إضافة للفاتورة</button>
+    </div>
+
+    <div class="card-box tbl-scroll" style="margin-bottom:10px;">
+      <table class="data-tbl">
+        <thead><tr><th>الصنف</th><th>الكمية</th><th>التكلفة</th><th>الإجمالي</th><th></th></tr></thead>
+        <tbody>
+          ${pInvItems.length === 0
+            ? `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px;">لم تُضَف أصناف بعد</td></tr>`
+            : pInvItems.map((it,idx) => `
+            <tr>
+              <td>${esc(it.name)}</td>
+              <td class="tabular">${fmtNum(it.qty)}</td>
+              <td class="tabular">${fmtNum(it.cost)}</td>
+              <td class="tabular" style="font-weight:800;">${fmtNum(it.qty*it.cost)}</td>
+              <td><button class="del-x" onclick="removePurchaseItem(${idx})">✕</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pay-summary-mini" style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;">
+      <span>إجمالي فاتورة الشراء</span>
+      <b class="tabular" style="font-size:16px;">${fmt(total)}</b>
+    </div>
+
+    <div class="form-group">
+      <label>طريقة الدفع للمورد</label>
+      <div class="seg">
+        <button class="pf-method ${pInvPayMethod==='cash'?'active':''}" data-m="cash" onclick="setPurchaseMethod(this,'cash')">💵 نقدي كامل</button>
+        <button class="pf-method ${pInvPayMethod==='partial'?'active':''}" data-m="partial" onclick="setPurchaseMethod(this,'partial')">🔶 جزئي</button>
+        <button class="pf-method ${pInvPayMethod==='credit'?'active':''}" data-m="credit" onclick="setPurchaseMethod(this,'credit')">🧾 آجل كامل</button>
+      </div>
+    </div>
+    <div class="form-group" id="pf_partialWrap" style="display:${pInvPayMethod==='partial'?'block':'none'};">
+      <label>المبلغ المدفوع الآن</label>
+      <input type="number" id="pf_partialAmt" min="0" max="${total}" class="tabular" placeholder="0" oninput="updPurchasePartialPreview()">
+      <div class="partial-prev" id="pf_partialPrev" style="margin-top:8px;">المتبقي كذمة للمورد: <b class="tabular">${fmt(total)}</b></div>
+    </div>
+
+    <button class="btn btn-gold btn-block" style="margin-top:6px;" onclick="confirmPurchase()">💾 حفظ فاتورة الشراء</button>`;
+}
+function addPurchaseItem(){
+  const pid = document.getElementById('pf_product').value;
+  const qty = Number(document.getElementById('pf_qty').value) || 0;
+  const cost = Number(document.getElementById('pf_cost').value) || 0;
+  const p = products.find(x => x.id === pid);
+  if(!p || qty < 1){ showToast('اختر الصنف والكمية بشكل صحيح', '⚠️'); return; }
+  if(cost <= 0){ showToast('أدخل سعر تكلفة صحيح', '⚠️'); return; }
+  pInvItems.push({productId:pid, name: p.name + (p.weight ? ' ('+p.weight+')' : ''), qty, cost});
+  renderPurchaseForm();
+}
+function removePurchaseItem(idx){
+  pInvItems.splice(idx,1);
+  renderPurchaseForm();
+}
+function setPurchaseMethod(btn, m){
+  pInvPayMethod = m;
+  renderPurchaseForm();
+}
+function updPurchasePartialPreview(){
+  const total = purchaseTotal();
+  const a = Math.max(0, Math.min(total, Number(document.getElementById('pf_partialAmt').value) || 0));
+  document.getElementById('pf_partialPrev').innerHTML = `المتبقي كذمة للمورد: <b class="tabular">${fmt(total - a)}</b>`;
+}
+function confirmPurchase(){
+  if(pInvItems.length === 0){ showToast('أضف صنفًا واحدًا على الأقل للفاتورة', '⚠️'); return; }
+  
+  let supId = document.getElementById('pf_supplier').value;
+  if(!supId){ showToast('اختر المورد أو أدخل اسم مورد جديد', '⚠️'); return; }
+
+  if(supId === '__other__'){
+    const newName = document.getElementById('pf_supplierOther') ? document.getElementById('pf_supplierOther').value.trim() : '';
+    if(!newName){ showToast('أدخل اسم المورد الجديد', '⚠️'); return; }
+    
+    const newSup = { id: 's' + Date.now(), name: newName, phone: '', category: 'مواد تموينية', balance: 0, payments: [], invoiceIds: [] };
+    addSupplierManual(newSup);
+    supId = newSup.id;
+  }
+
+  pInvSupplier = supId;
+  const total = purchaseTotal();
+  let paid = 0, remaining = 0, opNo = '';
+  if(pInvPayMethod === 'cash'){ paid = total; remaining = 0; }
+  else if(pInvPayMethod === 'credit'){ paid = 0; remaining = total; }
+  else {
+    paid = Math.max(0, Math.min(total, Number(document.getElementById('pf_partialAmt').value) || 0));
+    remaining = total - paid;
+  }
+  const inv = addPurchase({supplierId:pInvSupplier, branch:pInvBranch, items:pInvItems, total, paid, remaining, payMethod:pInvPayMethod, opNo});
+  closeModal('purchaseModal');
+  if (typeof savePurchaseToSupabase === 'function') savePurchaseToSupabase(inv);
+  showToast(`تم حفظ فاتورة الشراء #${inv.id} — أُضيفت الكمية لمخزون ${branchName(pInvBranch)}`, '✅');
+  render();
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(activeUnitId());
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+renderTopbar('الموردون');
+renderShellNav('suppliers');
+render();
+renderNotifications();
+initRealtimeNotifs();
+</script>
+</body>
+</html>

@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — المخزون</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+
+<!-- ============ نافذة إدارة وتعديل التصنيفات ============ -->
+<div class="modal-overlay" id="catMgmtModal">
+  <div class="modal-card" style="max-width:580px;">
+    <div class="modal-head"><h3>🏷️ إدارة وتعديل التصنيفات</h3><button class="modal-close" onclick="closeModal('catMgmtModal')">✕</button></div>
+    <div id="catMgmtBody" style="max-height:420px;overflow-y:auto;padding-left:4px;"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('catMgmtModal')">إغلاق</button>
+      <button class="btn btn-gold btn-block" onclick="openAddMainCatPrompt()">➕ إضافة تصنيف رئيسي جديد</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ نافذة إضافة / تعديل صنف ============ -->
+<div class="modal-overlay" id="itemModal">
+  <div class="modal-card" style="max-width:640px;">
+    <div class="modal-head"><h3 id="itemModalTitle">➕ إضافة صنف جديد</h3><button class="modal-close" onclick="closeModal('itemModal')">✕</button></div>
+    <div id="itemForm"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('itemModal')">إلغاء</button>
+      <button class="btn btn-gold btn-block" onclick="saveItemForm()">💾 حفظ الصنف</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ نافذة تفاصيل الصنف ============ -->
+<div class="modal-overlay" id="viewModal">
+  <div class="modal-card" style="max-width:520px;">
+    <div class="modal-head"><h3>🏷️ تفاصيل الصنف</h3><button class="modal-close" onclick="closeModal('viewModal')">✕</button></div>
+    <div id="viewBody"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة طلب تحويل جديد ============ -->
+<div class="modal-overlay" id="transferModal">
+  <div class="modal-card" style="max-width:520px;">
+    <div class="modal-head"><h3>🔄 طلب تحويل جديد</h3><button class="modal-close" onclick="closeModal('transferModal')">✕</button></div>
+    <div id="transferForm"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('transferModal')">إلغاء</button>
+      <button class="btn btn-gold btn-block" onclick="submitTransfer()">📤 إرسال الطلب</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة المخزون — تفاصيل الأصناف الكاملة + مخزون كل فرع + إضافة صنف جديد
+   ===================================================================== */
+let invFilter   = 'all';   // all | ok | low | out | expiring
+let invSearch   = '';
+let invMainCat  = 'all';
+let invSubCat   = 'all';
+let editingId   = null;    // null = إضافة جديد، وإلا تعديل صنف موجود
+
+function LOW_THRESHOLD(){ return APP_SETTINGS.lowStockThreshold || 15; } // عتبة "مخزون منخفض" (قابلة للضبط من شاشة الإعدادات)
+const WH = warehouseUnits(); // الفروع صاحبة المخزون الفعلي (بدون "الإدارة")
+
+function stockTotal(p){ return WH.reduce((s,u) => s + ((p.stock && p.stock[u.id]) || 0), 0); }
+function activeBranchStock(p){
+  const u = activeUnitId();
+  if (u === 'u1') return stockTotal(p);
+  return (p.stock && p.stock[u] !== undefined) ? Number(p.stock[u]) : 0;
+}
+function stockStatus(p){
+  const q = activeBranchStock(p);
+  return q === 0 ? 'out' : (q <= LOW_THRESHOLD() ? 'low' : 'ok');
+}
+function expiryBadge(p){
+  if(!p.expiry) return '<span class="badge badge-muted">بدون تاريخ</span>';
+  const d = daysUntil(p.expiry);
+  if(d < 0)  return `<span class="badge badge-clay">منتهي</span>`;
+  if(d <= APP_SETTINGS.expiryAlertDays) return `<span class="badge badge-amber tabular">${d} يوم</span>`;
+  return `<span class="badge badge-sage tabular">${esc(p.expiry)}</span>`;
+}
+function filteredProducts(){
+  return products.filter(p => {
+    if(invMainCat !== 'all' && p.mainCat !== invMainCat) return false;
+    if(invSubCat !== 'all' && p.subCat !== invSubCat) return false;
+    if(invFilter === 'expiring'){
+      if(!p.expiry || daysUntil(p.expiry) > APP_SETTINGS.expiryAlertDays) return false;
+    } else if(invFilter !== 'all' && stockStatus(p) !== invFilter){
+      return false;
+    }
+    if(invSearch){
+      const q = invSearch.trim();
+      const hay = [p.name, p.brand, p.subCat, p.mainCat, p.barcode].join(' ');
+      if(!fuzzyIncludes(hay, q)) return false;
+    }
+    return true;
+  });
+}
+
+function render(){
+  const counts = {
+    out: products.filter(p => stockStatus(p) === 'out').length,
+    low: products.filter(p => stockStatus(p) === 'low').length,
+    ok:  products.filter(p => stockStatus(p) === 'ok').length,
+    expiring: products.filter(p => p.expiry && daysUntil(p.expiry) !== null && daysUntil(p.expiry) <= (APP_SETTINGS.expiryAlertDays || 20)).length
+  };
+  const mainCats = ['all', ...MAIN_CATS];
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>المخزون</h2>
+      <div class="section-sub">مخزون ${WH.map(u => esc(u.name)).join(' و')} — بيانات الأصناف الكاملة</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-outline" onclick="openCatMgmtModal()">🏷️ تعديل التصنيفات</button><button class="btn btn-gold" onclick="openAddItem()">➕ إضافة صنف جديد</button></div>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card ${invFilter==='all'?'active-card':''}" style="cursor:pointer;transition:all .2s ease;${invFilter==='all'?'border:2px solid var(--gold);background:var(--card-hi);':''}" onclick="setInvFilter('all')" title="انقر لتصفية كافة الأصناف">
+      <div class="stat-icon">📦</div>
+      <div class="stat-val tabular">${products.length}</div>
+      <div class="stat-lbl">إجمالي الأصناف</div>
+    </div>
+    <div class="stat-card ${invFilter==='out'?'active-card':''}" style="cursor:pointer;transition:all .2s ease;${invFilter==='out'?'border:2px solid var(--clay);background:var(--card-hi);':''}" onclick="setInvFilter('out')" title="انقر لعرض الأصناف النافذة بالكامل">
+      <div class="stat-icon">🚫</div>
+      <div class="stat-val tabular" style="color:var(--clay)">${counts.out}</div>
+      <div class="stat-lbl">نفد بالكامل</div>
+    </div>
+    <div class="stat-card ${invFilter==='low'?'active-card':''}" style="cursor:pointer;transition:all .2s ease;${invFilter==='low'?'border:2px solid var(--amber);background:var(--card-hi);':''}" onclick="setInvFilter('low')" title="انقر لعرض الأصناف المنخفضة">
+      <div class="stat-icon">⚠️</div>
+      <div class="stat-val tabular" style="color:var(--amber)">${counts.low}</div>
+      <div class="stat-lbl">منخفض (${LOW_THRESHOLD()} فأقل)</div>
+      <div style="font-size:10px;margin-top:4px;color:var(--muted);" onclick="event.stopPropagation()">
+        العتبة: <input type="number" id="lowThreshInp" value="${LOW_THRESHOLD()}" style="width:45px;padding:1px 3px;font-size:10px;border-radius:4px;border:1px solid var(--border);" onchange="updateLowThreshold(this.value)"> قطعة
+      </div>
+    </div>
+    <div class="stat-card ${invFilter==='expiring'?'active-card':''}" style="cursor:pointer;transition:all .2s ease;${invFilter==='expiring'?'border:2px solid var(--amber);background:var(--card-hi);':''}" onclick="setInvFilter('expiring')" title="انقر لعرض الأصناف القريبة من الانتهاء">
+      <div class="stat-icon">⏳</div>
+      <div class="stat-val tabular" style="color:var(--amber)">${counts.expiring}</div>
+      <div class="stat-lbl">قرب انتهاء الصلاحية (خلال 20 يوم)</div>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <div class="search-box" style="min-height:42px;">
+      <span>🔍</span>
+      <input type="text" placeholder="بحث بالاسم / الشركة / الباركود..." value="${esc(invSearch)}" oninput="invSearch=this.value;renderInvRows()">
+    </div>
+    <div class="cat-chips" style="margin-top:10px;margin-bottom:0;display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;">
+      <button class="cat-chip ${invMainCat==='all'?'active':''}" onclick="setInvMainCat('all')">كل التصنيفات</button>
+      ${MAIN_CATS.map(c => `<button class="cat-chip ${invMainCat===c?'active':''}" onclick="setInvMainCat('${esc(c)}')">${esc(c)}</button>`).join('')}
+    </div>
+    ${invMainCat !== 'all' && (SUB_CATS[invMainCat] || []).length > 0 ? `
+    <div class="cat-chips" style="margin-top:6px;margin-bottom:0;display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;">
+      <button class="cat-chip ${invSubCat==='all'?'active':''}" style="font-size:11px;padding:3px 10px;" onclick="setInvSubCat('all')">الكل (${esc(invMainCat)})</button>
+      ${(SUB_CATS[invMainCat] || []).map(sc => `<button class="cat-chip ${invSubCat===sc?'active':''}" style="font-size:11px;padding:3px 10px;" onclick="setInvSubCat('${esc(sc)}')">${esc(sc)}</button>`).join('')}
+    </div>
+    ` : ''}
+    <div class="cat-chips" style="margin-top:8px;margin-bottom:0;">
+      <button class="cat-chip ${invFilter==='all'?'active':''}" onclick="setInvFilter('all')">الكل</button>
+      <button class="cat-chip ${invFilter==='ok'?'active':''}" onclick="setInvFilter('ok')">متوفر</button>
+      <button class="cat-chip ${invFilter==='low'?'active':''}" onclick="setInvFilter('low')">منخفض</button>
+      <button class="cat-chip ${invFilter==='out'?'active':''}" onclick="setInvFilter('out')">نفد</button>
+      <button class="cat-chip ${invFilter==='expiring'?'active':''}" onclick="setInvFilter('expiring')">قرب الانتهاء</button>
+    </div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <table class="data-tbl">
+      <thead><tr>
+        <th>التصنيف الرئيسي</th>
+        <th>الصنف</th>
+        <th>الشركة المصنعة</th>
+        <th>الاسم</th>
+        <th>الوزن/الحجم</th>
+        <th>الوحدة</th>
+        <th>عبوة الجملة</th>
+        <th>الباركود</th>
+        <th>سعر التكلفة</th>
+        <th>سعر الجملة</th>
+        <th>سعر المفرق</th>
+        ${WH.map(u => `<th>🏬 ${esc(u.name)}</th>`).join('')}
+        <th>الإجمالي</th>
+        <th>الصلاحية</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="invRows"></tbody>
+    </table>
+  </div>
+
+  <div class="card-box">
+    <div class="section-head" style="margin-bottom:6px;">
+      <div>
+        <h3 style="margin:0;">🔄 التحويلات بين الفرعين</h3>
+        <div class="row-sub" style="margin-top:2px;">اطلب نقل بضاعة من فرع إلى آخر عند النقص — الكاشير بأي فرع يرى مخزون الفرع الآخر لهذا الغرض.</div>
+      </div>
+      <button class="btn btn-gold" onclick="openTransferModal()">➕ طلب تحويل جديد</button>
+    </div>
+    <div class="tbl-scroll" style="margin-top:10px;">
+      <table class="data-tbl">
+        <thead><tr>
+          <th>الرقم</th><th>من</th><th>إلى</th><th>الصنف</th><th>الكمية</th><th>التاريخ</th><th>الحالة</th><th></th>
+        </tr></thead>
+        <tbody id="transferRows"></tbody>
+      </table>
+    </div>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+  renderInvRows();
+  renderTransferRows();
+}
+
+/* ---------- طلبات التحويل بين الفروع ---------- */
+function transferStatusBadge(s){
+  const map = {
+    'بانتظار الموافقة': 'badge-amber',
+    'تمت الموافقة':     'badge-gold',
+    'تم الاستلام':      'badge-sage',
+    'مرفوض':            'badge-clay'
+  };
+  return `<span class="badge ${map[s] || 'badge-muted'}">${esc(s)}</span>`;
+}
+function renderTransferRows(){
+  const rowsEl = document.getElementById('transferRows');
+  if(!rowsEl) return;
+  if(transfers.length === 0){
+    rowsEl.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:22px;">لا توجد طلبات تحويل بعد</td></tr>`;
+    return;
+  }
+  rowsEl.innerHTML = transfers.map(t => {
+    const fromU = UNITS.find(u => u.id === t.fromUnit);
+    const toU   = UNITS.find(u => u.id === t.toUnit);
+    const p     = products.find(x => x.id === t.productId);
+    let actions = '';
+    if(t.status === 'بانتظار الموافقة'){
+      actions = `<button class="btn btn-outline" style="padding:6px 10px;font-size:11px;" onclick="respondTransfer('${t.id}','تمت الموافقة')">✅ موافقة</button>
+                 <button class="btn btn-outline" style="padding:6px 10px;font-size:11px;color:var(--clay);" onclick="respondTransfer('${t.id}','مرفوض')">✕ رفض</button>`;
+    } else if(t.status === 'تمت الموافقة'){
+      actions = `<button class="btn btn-gold" style="padding:6px 10px;font-size:11px;" onclick="respondTransfer('${t.id}','تم الاستلام')">📥 تأكيد الاستلام</button>`;
+    }
+    return `<tr>
+      <td class="tabular">${esc(t.id)}</td>
+      <td>${esc(fromU ? fromU.name : '—')}</td>
+      <td>${esc(toU ? toU.name : '—')}</td>
+      <td>${esc(p ? p.name + (p.weight ? ` (${p.weight})` : '') : '—')}</td>
+      <td class="tabular">${fmtNum(t.qty)}</td>
+      <td class="tabular">${esc(t.date)}</td>
+      <td>${transferStatusBadge(t.status)}</td>
+      <td style="white-space:nowrap;">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+function transferFormHtml(){
+  return `
+  <div class="form-row2">
+    <div class="form-group">
+      <label>من فرع *</label>
+      <select id="tr_from" onchange="onTransferFromChange()">
+        ${WH.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>إلى فرع *</label>
+      <select id="tr_to"></select>
+    </div>
+  </div>
+  <div class="form-group" style="position:relative;">
+    <label>اختيار الصنف للتحويل * (بحث بالاسم أو الباركود)</label>
+    <div style="display:flex;gap:6px;">
+      <input type="text" id="tr_productSearch" placeholder="🔍 ابحث بالاسم أو امسح الباركود..." oninput="trSearchInput(this.value)" autocomplete="off">
+      <button type="button" class="btn btn-outline" style="padding:0 12px;" onclick="scanTransferBarcode()" title="مسح الباركود بالكاميرا">📷</button>
+    </div>
+    <input type="hidden" id="tr_product_id" value="">
+    <div id="tr_ac_box" class="pos-ac" style="display:none;position:absolute;top:100%;right:0;left:0;z-index:99;background:var(--card);border:1px solid var(--border);border-radius:8px;max-height:220px;overflow-y:auto;box-shadow:var(--shadow-md);"></div>
+  </div>
+  <div id="tr_selected_card" style="display:none;background:var(--card-hi);padding:10px 14px;border-radius:8px;margin-bottom:12px;border:1px solid var(--border-gold);">
+    <div style="font-weight:700;color:var(--gold-dark);" id="tr_sel_name">—</div>
+    <div class="row-sub" id="tr_sel_meta">—</div>
+  </div>
+  <div class="form-group">
+    <label>الكمية المراد نقلها *</label>
+    <input type="number" id="tr_qty" min="1" value="1" class="tabular">
+    <div class="row-sub" id="tr_stockHint" style="margin-top:4px;"></div>
+  </div>
+  <div class="form-group">
+    <label>ملاحظة (اختياري)</label>
+    <input type="text" id="tr_note" placeholder="مثال: نقص لدى الفرع الثاني">
+  </div>`;
+}
+
+function trSearchInput(q){
+  const box = document.getElementById('tr_ac_box');
+  if(!box) return;
+  if(!q || !q.trim()){ box.style.display = 'none'; return; }
+  const normQ = q.trim();
+  const fromId = document.getElementById('tr_from').value;
+  
+  const rawMatches = products.filter(p => fuzzyIncludes(p.name, normQ) || (p.barcode && p.barcode.includes(normQ)) || fuzzyIncludes(p.brand, normQ));
+  const matches = sortSearchResults(rawMatches, normQ, p => p.name).slice(0, 8);
+  
+  if(matches.length === 0){
+    box.innerHTML = `<div style="padding:10px;color:var(--muted);text-align:center;">لا توجد أصناف مطابقة</div>`;
+    box.style.display = 'block';
+    return;
+  }
+  
+  box.innerHTML = matches.map(p => {
+    const avail = p.stock[fromId] || 0;
+    return `<div class="ac-item" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-sub);" onclick="selectTransferProduct('${p.id}')">
+      <div>
+        <div style="font-weight:600;">${esc(p.name)}${p.weight ? ' ('+esc(p.weight)+')' : ''}</div>
+        <div class="row-sub">باركود: ${esc(p.barcode || '—')} • متوفر بالفرع: <b style="color:${avail>0?'var(--sage)':'var(--clay)'}">${avail}</b></div>
+      </div>
+    </div>`;
+  }).join('');
+  box.style.display = 'block';
+}
+
+function selectTransferProduct(pid){
+  const p = products.find(x => x.id === pid);
+  if(!p) return;
+  const fromId = document.getElementById('tr_from').value;
+  document.getElementById('tr_product_id').value = p.id;
+  document.getElementById('tr_productSearch').value = p.name;
+  document.getElementById('tr_ac_box').style.display = 'none';
+  
+  const card = document.getElementById('tr_selected_card');
+  const nameEl = document.getElementById('tr_sel_name');
+  const metaEl = document.getElementById('tr_sel_meta');
+  const avail = p.stock[fromId] || 0;
+  
+  if(card && nameEl && metaEl){
+    nameEl.innerText = p.name + (p.weight ? ` (${p.weight})` : '');
+    metaEl.innerText = `الكمية المتاحة في المصدر: ${avail} ${p.saleUnit || 'قطعة'}`;
+    card.style.display = 'block';
+  }
+}
+
+function scanTransferBarcode(){
+  if(typeof startBarcodeScan === 'function'){
+    startBarcodeScan(function(code){
+      const p = products.find(x => x.barcode === code);
+      if(!p){ showToast(`لم يتم العثور على صنف بالباركود: ${code}`, '⚠️'); return; }
+      selectTransferProduct(p.id);
+    });
+  }
+}
+
+function fillTransferSelects(){
+  const fromSel = document.getElementById('tr_from');
+  const toSel   = document.getElementById('tr_to');
+  if(!fromSel || !toSel) return;
+  const fromId  = fromSel.value;
+  toSel.innerHTML = WH.filter(u => u.id !== fromId).map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+}
+function onTransferFromChange(){ fillTransferSelects(); }
+function openTransferModal(){
+  document.getElementById('transferForm').innerHTML = transferFormHtml();
+  fillTransferSelects();
+  openModal('transferModal');
+}
+function submitTransfer(){
+  const fromUnit = document.getElementById('tr_from').value;
+  const toUnit = document.getElementById('tr_to').value;
+  const productId = document.getElementById('tr_product_id').value;
+  const qty = Number(document.getElementById('tr_qty').value) || 0;
+  const note = document.getElementById('tr_note').value.trim();
+  const p = products.find(x => x.id === productId);
+  if(!p || qty < 1){ showToast('يرجى اختيار الصنف والكمية بشكل صحيح', '⚠️'); return; }
+  const avail = p.stock[fromUnit] || 0;
+  if(qty > avail){ showToast(`الكمية المتوفرة فقط ${avail}`, '⚠️'); return; }
+  const id = 'TR-' + String(Date.now()).slice(-6);
+  addTransfer({id, fromUnit, toUnit, productId, qty, status:'بانتظار الموافقة', date:nowStr().slice(0,10), note});
+  closeModal('transferModal');
+  showToast('تم إرسال طلب التحويل بانتظار الموافقة', '✅');
+  renderTransferRows();
+
+  /* إشعار صوتي فوري لفرع الوجهة (وأي شاشة مفتوحة حاليًا) بوصول طلب تحويل جديد */
+  const toName = (UNITS.find(u => u.id === toUnit) || {}).name || '';
+  const title = `🔄 طلب تحويل جديد (${id}) — ${p.name}${p.weight ? ' ('+p.weight+')' : ''} × ${fmtNum(qty)} إلى ${toName}`;
+  pushNotification(title, toUnit, '🔄');
+  refreshBellDot();
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(activeUnitId());
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+function respondTransfer(id, newStatus){
+  const t = transfers.find(x => x.id === id);
+  if(!t) return;
+  const p = products.find(x => x.id === t.productId);
+
+  if(newStatus === 'تمت الموافقة' || newStatus === 'تم الاستلام'){
+    if(p){
+      if(!t.deducted){
+        const avail = p.stock[t.fromUnit] || 0;
+        if(t.qty > avail){
+          showToast(`الكمية غير متوفرة بالكامل لدى فرع المصدر (المتوفر: ${avail})`, '⚠️');
+          return;
+        }
+        p.stock[t.fromUnit] = avail - t.qty;
+        t.deducted = true;
+      }
+      if(newStatus === 'تم الاستلام' && !t.received){
+        p.stock[t.toUnit] = (p.stock[t.toUnit] || 0) + t.qty;
+        t.received = true;
+      }
+      updateProduct(p.id, {stock: p.stock});
+    }
+    showToast(newStatus === 'تم الاستلام' ? 'تم تأكيد الاستلام وخصم/إضافة الكمية بنجاح' : 'تمت الموافقة وخصم الكمية من المصدر', '✅');
+  } else if(newStatus === 'مرفوض'){
+    if(t.deducted && p){
+      p.stock[t.fromUnit] = (p.stock[t.fromUnit] || 0) + t.qty;
+      t.deducted = false;
+      updateProduct(p.id, {stock: p.stock});
+    }
+    showToast('تم رفض طلب التحويل', '⚠️');
+  }
+
+  logAudit('transfer', t.toUnit, t.id, `${newStatus} — تحويل ${p ? p.name : t.productId} × ${t.qty}`);
+  updateTransferStatus(id, newStatus);
+  render();
+}
+function updateLowThreshold(val){
+  const num = Number(val) || 15;
+  APP_SETTINGS.lowStockThreshold = Math.max(1, num);
+  if (typeof persistAppSettings === 'function') persistAppSettings();
+  showToast(`تم تحديث عتبة المخزون المنخفض إلى ${num} قطعة`, '⚙️');
+  render();
+}
+function setInvFilter(f){ invFilter = f; render(); }
+function setInvMainCat(c){ invMainCat = c; invSubCat = 'all'; render(); }
+function setInvSubCat(sc){ invSubCat = sc; render(); }
+
+function renderInvRows(){
+  const rowsEl = document.getElementById('invRows');
+  if(!rowsEl) return;
+  const list = filteredProducts();
+  const colspan = WH.length + 10;
+  if(list.length === 0){
+    rowsEl.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--muted);padding:22px;">لا توجد أصناف مطابقة</td></tr>`;
+    return;
+  }
+  rowsEl.innerHTML = list.map(p => `
+    <tr>
+      <td>${esc(p.mainCat)}</td>
+      <td>${esc(p.subCat || '—')}</td>
+      <td>${esc(p.brand || '—')}${p.origin ? `<div class="row-sub" style="margin:0;">${esc(p.origin)}</div>` : ''}</td>
+      <td>
+        <div class="row-title" style="margin-bottom:0;">${esc(p.name)}</div>
+      </td>
+      <td class="tabular">${p.weight ? esc(p.weight) : '—'}</td>
+      <td>${esc(p.saleUnit || '—')}</td>
+      <td>${p.bulkPack ? esc(p.bulkPack) : '<span class="badge badge-muted">—</span>'}</td>
+      <td class="tabular">${esc(p.barcode)}</td>
+      <td class="tabular">${fmtNum(p.cost)}</td>
+      <td class="tabular">${fmtNum(p.wholesale)}</td>
+      <td class="tabular">${fmtNum(p.retail)}</td>
+      ${WH.map(u => {
+        const q = p.stock[u.id] || 0;
+        const cls = q === 0 ? 'badge-clay' : (q <= 10 ? 'badge-amber' : 'badge-sage');
+        return `<td><span class="badge ${cls} tabular">${q}</span></td>`;
+      }).join('')}
+      <td class="tabular" style="font-weight:800;">${stockTotal(p)}</td>
+      <td>${expiryBadge(p)}</td>
+      <td><button class="btn btn-outline" style="padding:6px 10px;font-size:11px;" onclick="openEditItem('${p.id}')">✏️ تعديل</button></td>
+    </tr>`).join('');
+}
+
+/* ---------- نافذة إضافة / تعديل صنف ---------- */
+function itemFormHtml(p){
+  p = p || {mainCat:MAIN_CATS[0], subCat:'', brand:BRANDS[0], origin:'', name:'', weight:'', saleUnit:SALE_UNITS[0],
+            bulkPack:'', barcode:'', cost:'', wholesale:'', retail:'', expiry:'', stock:{}};
+  
+  const isCustomMain = !MAIN_CATS.includes(p.mainCat) && p.mainCat;
+  const currentMain = isCustomMain ? '__other__' : (p.mainCat || MAIN_CATS[0]);
+  const subOptions = (SUB_CATS[currentMain] || []);
+  const isCustomSub = !subOptions.includes(p.subCat) && p.subCat;
+  const currentSub = isCustomSub ? '__other__' : (p.subCat || subOptions[0] || '__other__');
+
+  return `
+  <div class="form-row2">
+    <div class="form-group">
+      <label>التصنيف الرئيسي *</label>
+      <select id="f_mainCat" onchange="onMainCatChange()">
+        ${MAIN_CATS.map(c => `<option value="${esc(c)}" ${currentMain===c?'selected':''}>${esc(c)}</option>`).join('')}
+        <option value="__other__" ${isCustomMain?'selected':''}>غير ذلك (أدخله يدويًا)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>الصنف (تصنيف فرعي) *</label>
+      <select id="f_subCat" onchange="toggleSubCatOther()">
+        ${subOptions.map(c => `<option value="${esc(c)}" ${currentSub===c?'selected':''}>${esc(c)}</option>`).join('')}
+        <option value="__other__" ${isCustomSub?'selected':''}>غير ذلك (أدخله يدويًا)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="form-group" id="f_mainCatOtherWrap" style="display:${isCustomMain ? 'block' : 'none'};margin-bottom:12px;">
+    <label style="color:var(--gold-dark);font-weight:700;">اسم التصنيف الرئيسي الجديد *</label>
+    <input type="text" id="f_mainCatOther" placeholder="أدخل اسم التصنيف الرئيسي..." value="${isCustomMain ? esc(p.mainCat) : ''}">
+  </div>
+
+  <div class="form-group" id="f_subCatOtherWrap" style="display:${isCustomSub || currentMain==='__other__' ? 'block' : 'none'};margin-bottom:12px;">
+    <label style="color:var(--gold-dark);font-weight:700;">اسم التصنيف الفرعي الجديد *</label>
+    <input type="text" id="f_subCatOther" placeholder="أدخل اسم التصنيف الفرعي يدوياً..." value="${isCustomSub ? esc(p.subCat) : ''}">
+  </div>
+
+  <div class="form-row2">
+    <div class="form-group">
+      <label>الشركة المصنعة *</label>
+      <select id="f_brand" onchange="toggleBrandOther()">
+        ${BRANDS.map(b => `<option value="${esc(b)}" ${p.brand===b?'selected':''}>${esc(b)}</option>`).join('')}
+        <option value="__other__" ${(!BRANDS.includes(p.brand) && p.brand) ? 'selected' : ''}>غير ذلك (أدخله يدويًا)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>بلد المنشأ (اختياري)</label>
+      <select id="f_origin">
+        <option value="">— بدون تحديد —</option>
+        ${ORIGINS.map(o => `<option value="${esc(o)}" ${p.origin===o?'selected':''}>${esc(o)}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+
+  <div class="form-group" id="f_brandOtherWrap" style="display:${(!BRANDS.includes(p.brand) && p.brand) ? 'block' : 'none'};margin-bottom:12px;">
+    <label style="color:var(--gold-dark);font-weight:700;">اسم الشركة المصنعة الجديدة *</label>
+    <input type="text" id="f_brandOther" placeholder="أدخل اسم الشركة المصنعة يدوياً..." value="${!BRANDS.includes(p.brand) ? esc(p.brand) : ''}">
+  </div>
+
+  <div class="form-group">
+    <label>الاسم * (يفضّل توضيح نوع العبوة ضمن الاسم — مثال: بيبسي علبة / بيبسي زجاج / بيبسي بلاستيك)</label>
+    <input type="text" id="f_name" placeholder="مثال: بيبسي علبة معدنية (تنك)" value="${esc(p.name)}">
+  </div>
+
+  <div class="form-row2">
+    <div class="form-group">
+      <label>الوزن / الحجم (اختياري — إن لم يكن للصنف وزن معين اتركه فارغًا)</label>
+      <input type="text" id="f_weight" placeholder="مثال: 5 كغ / 330 مل / 2 كغ" value="${esc(p.weight)}">
+    </div>
+    <div class="form-group">
+      <label>وحدة البيع *</label>
+      <select id="f_saleUnit">
+        ${SALE_UNITS.map(u => `<option value="${esc(u)}" ${p.saleUnit===u?'selected':''}>${esc(u)}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>عبوة الجملة (اختياري — كيف تُباع/تُجرد المادة بالجملة)</label>
+    <input type="text" id="f_bulkPack" placeholder="مثال: طرد 12 كيس / كرتونة 100 قطعة / شوال" value="${esc(p.bulkPack || '')}">
+    <div class="row-sub" style="margin-top:4px;">مهم عند إدخال صنف جديد وعند الجرد — يوضّح للكاشير/أمين المستودع الوحدة الفعلية لبيع وعدّ الجملة (طرد، كرتونة، شوال...)</div>
+  </div>
+
+  <div class="form-group">
+    <label>الباركود *</label>
+    <div class="scan-field">
+      <input type="text" id="f_barcode" placeholder="رقم الباركود (اكتبه، أو امسحه بماسح خارجي، أو بالكاميرا)" value="${esc(p.barcode)}" class="tabular">
+      <button type="button" class="scan-btn" title="مسح الباركود بالكاميرا" onclick="scanBarcodeIntoField('f_barcode')">📷</button>
+    </div>
+  </div>
+
+  <div class="form-row2" style="grid-template-columns:1fr 1fr 1fr;">
+    <div class="form-group">
+      <label>سعر التكلفة *</label>
+      <input type="number" id="f_cost" value="${p.cost}" class="tabular">
+    </div>
+    <div class="form-group">
+      <label>سعر الجملة *</label>
+      <input type="number" id="f_wholesale" value="${p.wholesale}" class="tabular">
+    </div>
+    <div class="form-group">
+      <label>سعر المفرق *</label>
+      <input type="number" id="f_retail" value="${p.retail}" class="tabular">
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>تاريخ انتهاء الصلاحية (اختياري — غير إلزامي؛ بعض المواد كالسكر تنفد قبل انتهاء صلاحيتها)</label>
+    <input type="date" id="f_expiry" value="${p.expiry || ''}">
+  </div>
+
+  <div class="form-group">
+    ${isHead ? `
+      <label>الكمية في كل فرع</label>
+      <div class="form-row2">
+        ${WH.map(u => `
+          <div>
+            <label style="font-weight:600;">${esc(u.name)}</label>
+            <input type="number" id="f_stock_${u.id}" value="${p.stock && p.stock[u.id] != null ? p.stock[u.id] : 0}" class="tabular">
+          </div>`).join('')}
+      </div>
+    ` : `
+      <label>الكمية المتوفرة في <b>${esc(activeUnit().name)}</b> *</label>
+      <input type="number" id="f_stock_${activeUnitId()}" value="${p.stock && p.stock[activeUnitId()] != null ? p.stock[activeUnitId()] : 0}" class="tabular">
+    `}
+  </div>`;
+}
+/* مسح باركود بالكاميرا وتعبئته مباشرة بحقل نصي — يعمل جنبًا لجنب مع الكتابة اليدوية
+   أو ماسح خارجي USB/بلوتوث (يعمل تلقائيًا بالحقل مباشرة بدون أي زر لأنه يتصرف كلوحة مفاتيح) */
+function scanBarcodeIntoField(fieldId){
+  startBarcodeScan(function(code){
+    const el = document.getElementById(fieldId);
+    if(el) el.value = code;
+    showToast('تم مسح الباركود بنجاح', '✅');
+  });
+}
+function onMainCatChange(){
+  const mc = document.getElementById('f_mainCat').value;
+  const mainWrap = document.getElementById('f_mainCatOtherWrap');
+  const subSel = document.getElementById('f_subCat');
+  
+  if(mc === '__other__'){
+    if(mainWrap) mainWrap.style.display = 'block';
+    if(subSel) subSel.innerHTML = `<option value="__other__" selected>غير ذلك (أدخله يدويًا)</option>`;
+  } else {
+    if(mainWrap) mainWrap.style.display = 'none';
+    const subOptions = SUB_CATS[mc] || [];
+    if(subSel) {
+      subSel.innerHTML = subOptions.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')
+        + `<option value="__other__">غير ذلك (أدخله يدويًا)</option>`;
+    }
+  }
+  toggleSubCatOther();
+}
+
+function toggleBrandOther(){
+  const b = document.getElementById('f_brand') ? document.getElementById('f_brand').value : '';
+  const wrap = document.getElementById('f_brandOtherWrap');
+  if(wrap){
+    wrap.style.display = b === '__other__' ? 'block' : 'none';
+  }
+}
+
+function toggleSubCatOther(){
+  const mc = document.getElementById('f_mainCat') ? document.getElementById('f_mainCat').value : '';
+  const sc = document.getElementById('f_subCat') ? document.getElementById('f_subCat').value : '';
+  const subWrap = document.getElementById('f_subCatOtherWrap');
+  if(subWrap){
+    subWrap.style.display = (mc === '__other__' || sc === '__other__') ? 'block' : 'none';
+  }
+}
+function openAddItem(){
+  editingId = null;
+  document.getElementById('itemModalTitle').innerText = '➕ إضافة صنف جديد';
+  document.getElementById('itemForm').innerHTML = itemFormHtml(null);
+  document.getElementById('f_subCat').addEventListener('change', toggleSubCatOther);
+  openModal('itemModal');
+}
+function openEditItem(pid){
+  const p = products.find(x => x.id === pid);
+  if(!p) return;
+  editingId = pid;
+  document.getElementById('itemModalTitle').innerText = '✏️ تعديل صنف — ' + p.name;
+  document.getElementById('itemForm').innerHTML = itemFormHtml(p);
+  document.getElementById('f_subCat').addEventListener('change', toggleSubCatOther);
+  openModal('itemModal');
+}
+function saveItemForm(){
+  let mainCat = document.getElementById('f_mainCat').value;
+  if(mainCat === '__other__'){
+    mainCat = document.getElementById('f_mainCatOther').value.trim();
+  }
+  let subCat = document.getElementById('f_subCat').value;
+  if(subCat === '__other__'){
+    subCat = document.getElementById('f_subCatOther').value.trim();
+  }
+
+  if(!mainCat || !subCat){
+    showToast('يرجى تحديد أو إدخال التصنيف الرئيسي والفرعي', '⚠️');
+    return;
+  }
+
+  if(!MAIN_CATS.includes(mainCat)) MAIN_CATS.push(mainCat);
+  if(!SUB_CATS[mainCat]) SUB_CATS[mainCat] = [];
+  if(!SUB_CATS[mainCat].includes(subCat)) SUB_CATS[mainCat].push(subCat);
+  let brand = document.getElementById('f_brand').value;
+  if(brand === '__other__'){
+    brand = document.getElementById('f_brandOther') ? document.getElementById('f_brandOther').value.trim() : '';
+  }
+  if(!brand){
+    showToast('يرجى تحديد أو إدخال اسم الشركة المصنعة', '⚠️');
+    return;
+  }
+  if(!BRANDS.includes(brand)) BRANDS.push(brand);
+  const origin = document.getElementById('f_origin').value;
+  const name = document.getElementById('f_name').value.trim();
+  const weight = document.getElementById('f_weight').value.trim();
+  const saleUnit = document.getElementById('f_saleUnit').value;
+  const bulkPack = document.getElementById('f_bulkPack').value.trim();
+  const barcode = document.getElementById('f_barcode').value.trim();
+  const cost = Number(document.getElementById('f_cost').value) || 0;
+  const wholesale = Number(document.getElementById('f_wholesale').value) || 0;
+  const retail = Number(document.getElementById('f_retail').value) || 0;
+  const expiry = document.getElementById('f_expiry').value || null;
+
+  if(!name || !subCat || !barcode){
+    showToast('يرجى تعبئة: الصنف، الاسم، والباركود على الأقل', '⚠️');
+    return;
+  }
+  const activeUid = activeUnitId();
+  const existingProd = editingId ? products.find(p => p.id === editingId) : null;
+  const stock = existingProd && existingProd.stock ? { ...existingProd.stock } : {};
+
+  if (isHead) {
+    WH.forEach(u => {
+      const el = document.getElementById(`f_stock_${u.id}`);
+      if (el) stock[u.id] = Number(el.value) || 0;
+    });
+  } else {
+    const el = document.getElementById(`f_stock_${activeUid}`);
+    if (el) stock[activeUid] = Number(el.value) || 0;
+  }
+
+  if(editingId){
+    updateProduct(editingId, {mainCat, subCat, brand, origin, name, weight, saleUnit, bulkPack, barcode, cost, wholesale, retail, expiry, stock});
+    showToast('تم تحديث بيانات الصنف', '✅');
+  } else {
+    const id = 'p' + Date.now();
+    saveNewProduct({id, mainCat, subCat, brand, origin, name, weight, saleUnit, bulkPack, barcode, cost, wholesale, retail, expiry, stock});
+    showToast('تمت إضافة الصنف الجديد', '✅');
+  }
+  closeModal('itemModal');
+  render();
+}
+
+
+/* ---------- إدارة وتعديل التصنيفات ---------- */
+function openCatMgmtModal(){
+  renderCatMgmtBody();
+  openModal('catMgmtModal');
+}
+
+function renderCatMgmtBody(){
+  const body = document.getElementById('catMgmtBody');
+  if(!body) return;
+  
+  let html = MAIN_CATS.map(mc => {
+    const subs = SUB_CATS[mc] || [];
+    const count = products.filter(p => p.mainCat === mc).length;
+    return `
+    <div class="card-box" style="margin-bottom:10px;background:var(--card-hi);padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div>
+          <b style="font-size:15px;color:var(--gold-dark);">${esc(mc)}</b>
+          <span class="row-sub tabular">(${count} صنف)</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px;" onclick="renameMainCatPrompt('${esc(mc)}')">✏️ تعديل الاسم</button>
+          <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px;" onclick="openAddSubCatPrompt('${esc(mc)}')">➕ فرعي جديد</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${subs.length === 0 ? '<span class="row-sub">لا توجد تصنيفات فرعية</span>' : subs.map(sc => `
+          <span class="badge badge-gold" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:11px;">
+            ${esc(sc)}
+            <span style="cursor:pointer;font-size:10px;opacity:.8;" onclick="renameSubCatPrompt('${esc(mc)}','${esc(sc)}')" title="تعديل اسم التصنيف الفرعي">✏️</span>
+          </span>
+        `).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = html;
+}
+
+function openAddMainCatPrompt(){
+  const name = prompt("أدخل اسم التصنيف الرئيسي الجديد:");
+  if(name && name.trim()){
+    const trimmed = name.trim();
+    if(!MAIN_CATS.includes(trimmed)){
+      MAIN_CATS.push(trimmed);
+      SUB_CATS[trimmed] = [];
+      renderCatMgmtBody();
+      render();
+      showToast(`تمت إضافة التصنيف الرئيسي: ${trimmed}`, '✅');
+    } else {
+      showToast('التصنيف الرئيسي موجود مسبقاً', '⚠️');
+    }
+  }
+}
+
+function renameMainCatPrompt(oldName){
+  const newName = prompt(`تعديل اسم التصنيف الرئيسي (${oldName}):`, oldName);
+  if(newName && newName.trim() && newName.trim() !== oldName){
+    const trimmed = newName.trim();
+    
+    // Update MAIN_CATS array
+    const idx = MAIN_CATS.indexOf(oldName);
+    if(idx !== -1) MAIN_CATS[idx] = trimmed;
+    
+    // Update SUB_CATS object key
+    SUB_CATS[trimmed] = SUB_CATS[oldName] || [];
+    delete SUB_CATS[oldName];
+
+    // Update all matching products
+    products.forEach(p => {
+      if(p.mainCat === oldName){
+        p.mainCat = trimmed;
+        if(typeof updateProduct === 'function') updateProduct(p.id, {mainCat: trimmed, subCat: p.subCat, expiry: p.expiry});
+      }
+    });
+
+    renderCatMgmtBody();
+    render();
+    showToast(`تم تغيير اسم التصنيف الرئيسي إلى: ${trimmed}`, '✅');
+  }
+}
+
+function openAddSubCatPrompt(mainCat){
+  const name = prompt(`إضافة تصنيف فرعي جديد تحت (${mainCat}):`);
+  if(name && name.trim()){
+    const trimmed = name.trim();
+    if(!SUB_CATS[mainCat]) SUB_CATS[mainCat] = [];
+    if(!SUB_CATS[mainCat].includes(trimmed)){
+      SUB_CATS[mainCat].push(trimmed);
+      renderCatMgmtBody();
+      render();
+      showToast(`تمت إضافة التصنيف الفرعي: ${trimmed}`, '✅');
+    } else {
+      showToast('التصنيف الفرعي موجود مسبقاً', '⚠️');
+    }
+  }
+}
+
+function renameSubCatPrompt(mainCat, oldSubName){
+  const newSubName = prompt(`تعديل اسم التصنيف الفرعي (${oldSubName}):`, oldSubName);
+  if(newSubName && newSubName.trim() && newSubName.trim() !== oldSubName){
+    const trimmed = newSubName.trim();
+    
+    // Update SUB_CATS array
+    const subs = SUB_CATS[mainCat] || [];
+    const idx = subs.indexOf(oldSubName);
+    if(idx !== -1) subs[idx] = trimmed;
+
+    // Update all matching products
+    products.forEach(p => {
+      if(p.mainCat === mainCat && p.subCat === oldSubName){
+        p.subCat = trimmed;
+        if(typeof updateProduct === 'function') updateProduct(p.id, {mainCat: p.mainCat, subCat: trimmed, expiry: p.expiry});
+      }
+    });
+
+    renderCatMgmtBody();
+    render();
+    showToast(`تم تغيير اسم التصنيف الفرعي إلى: ${trimmed}`, '✅');
+  }
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+renderTopbar('المخزون');
+renderShellNav('inventory');
+render();
+renderNotifications();
+initRealtimeNotifs(); /* استقبال إشعار صوتي فوري عند وصول طلب تحويل من شاشة/تبويب آخر */
+</script>
+</body>
+</html>

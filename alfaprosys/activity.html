@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — سجل النشاط</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة سجل النشاط — حصرية للإدارة (u1)
+   1) قائمة المستخدمين مع آخر تسجيل دخول (بيانات تقريبية حاليًا — لا يوجد نظام دخول فعلي بعد)
+   2) سجل الأنشطة الكامل (auditLog بـ js/data.js) — مؤرشف بشكل دائم في localStorage (لا يُحذف تلقائيًا)
+      يغطي: مبيعات، فواتير شراء، تحويلات بين الفروع، تحصيل ديون عملاء/موردين، إتلاف، وتعديل/إلغاء/استبدال/استرجاع الفواتير
+   ===================================================================== */
+const uid = activeUnitId();
+let actFilterType = 'all';
+let actFilterDay  = 'today'; // today | all
+
+const TYPE_LABELS = {
+  sale:'🧾 فاتورة بيع', purchase:'🚚 فاتورة شراء', transfer:'🔄 تحويل مخزون',
+  customer_payment:'💳 تحصيل من عميل', supplier_payment:'💳 دفعة لمورد',
+  waste:'🗑️ إتلاف', edit:'✏️ تعديل فاتورة', cancel:'❌ إلغاء فاتورة',
+  exchange:'🔁 استبدال صنف', return:'↩️ استرجاع صنف'
+};
+
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id || '—'; }
+function todayStr(){ return nowStr().slice(0,10); }
+
+function filteredAudit(){
+  return auditLog.filter(a => {
+    if(actFilterType !== 'all' && a.type !== actFilterType) return false;
+    if(actFilterDay === 'today' && (a.time||'').slice(0,10) !== todayStr()) return false;
+    return true;
+  });
+}
+
+function render(){
+  const list = filteredAudit();
+  const todayCount = auditLog.filter(a => (a.time||'').slice(0,10) === todayStr()).length;
+
+  let html = `
+  <div class="section-head">
+    <div>
+      <h2>📜 سجل النشاط</h2>
+      <div class="section-sub">كل المستخدمين وآخر دخول، وسجل أنشطة كامل مؤرشف بشكل دائم</div>
+    </div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <h3>👥 المستخدمون وآخر تسجيل دخول</h3>
+    <table class="data-tbl">
+      <thead><tr><th>المستخدم</th><th>الدور</th><th>الوحدة</th><th>آخر دخول</th></tr></thead>
+      <tbody>
+        ${users.map(u => `
+          <tr>
+            <td>${esc(u.name)}</td>
+            <td><span class="badge ${u.role==='owner'?'badge-gold':'badge-sage'}">${u.role==='owner' ? 'مدير عام' : 'كاشير'}</span></td>
+            <td>${esc(branchName(u.unit))}</td>
+            <td class="tabular">${esc(u.lastLogin)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="row-sub" style="margin-top:8px;">* لا يوجد نظام دخول فعلي بكلمة مرور/رمز PIN بعد — بيانات "آخر دخول" تقريبية حاليًا، وستصبح دقيقة تلقائيًا عند إضافة نظام مستخدمين حقيقي.</div>
+  </div>
+
+  <div class="card-box">
+    <h3>📋 سجل الأنشطة (${fmtNum(todayCount)} نشاط اليوم — ${fmtNum(auditLog.length)} إجمالي مؤرشف)</h3>
+    <div class="cat-chips" style="margin-bottom:6px;">
+      <button class="cat-chip ${actFilterDay==='today'?'active':''}" onclick="setDayFilter('today')">اليوم فقط</button>
+      <button class="cat-chip ${actFilterDay==='all'?'active':''}" onclick="setDayFilter('all')">كل الأرشيف</button>
+    </div>
+    <div class="cat-chips" style="margin-bottom:12px;">
+      <button class="cat-chip ${actFilterType==='all'?'active':''}" onclick="setTypeFilter('all')">الكل</button>
+      ${Object.keys(TYPE_LABELS).map(t => `<button class="cat-chip ${actFilterType===t?'active':''}" onclick="setTypeFilter('${t}')">${TYPE_LABELS[t]}</button>`).join('')}
+    </div>
+    ${list.length === 0 ? `<div class="row-sub">لا توجد أنشطة مطابقة لهذا الفلتر.</div>` : ''}
+    ${list.map(a => `
+      <div class="list-row">
+        <div class="row-main">
+          <div class="row-title">${TYPE_LABELS[a.type] || a.type} — ${esc(branchName(a.branch))}</div>
+          <div class="row-sub">${esc(a.desc)}</div>
+        </div>
+        <div class="row-sub tabular" style="flex-shrink:0;">${esc(a.time)}</div>
+      </div>`).join('')}
+  </div>`;
+
+  const area = document.getElementById('contentArea'); if(area) area.innerHTML = html;
+}
+
+function setTypeFilter(t){ actFilterType = t; render(); }
+function setDayFilter(d){ actFilterDay = d; render(); }
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(uid);
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+if(enforceAdminOnly('شاشة سجل النشاط')){
+  renderTopbar('سجل النشاط');
+  renderShellNav('activity');
+  render();
+  refreshBellDot();
+}
+</script>
+</body>
+</html>

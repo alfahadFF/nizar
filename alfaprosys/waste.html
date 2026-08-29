@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlfaProSys — الإتلاف</title>
+<link rel="stylesheet" href="css/fonts.css"> <!-- خطوط محلية (Changa/Almarai) — تعمل أوفلاين بدون إنترنت -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="page" id="appPage">
+  <!-- ============ الشريط الجانبي (كمبيوتر) ============ -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="streak-mark streak-sm"><span></span><span></span><span></span></div>
+      <div class="side-brand-txt">AlfaProSys</div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <!-- ============ العمود الرئيسي ============ -->
+  <div class="main-col">
+    <div class="topbar" id="topbar"></div>
+    <div class="content-area" id="contentArea"></div>
+  </div>
+</div>
+
+
+<!-- توست -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ التنبيهات ============ -->
+<div class="modal-overlay" id="notifModal">
+  <div class="modal-card">
+    <div class="modal-head"><h3>🔔 التنبيهات</h3><button class="modal-close" onclick="closeModal('notifModal')">✕</button></div>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- ============ نافذة تسجيل إتلاف جديد ============ -->
+<div class="modal-overlay" id="wasteModal">
+  <div class="modal-card" style="max-width:520px;">
+    <div class="modal-head"><h3>🗑️ تسجيل إتلاف صنف</h3><button class="modal-close" onclick="closeModal('wasteModal')">✕</button></div>
+    <div id="wasteForm"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-outline btn-block" onclick="closeModal('wasteModal')">إلغاء</button>
+      <button class="btn btn-danger btn-block" onclick="submitWaste()">🗑️ تأكيد الإتلاف</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+/* =====================================================================
+   شاشة الإتلاف
+   عند الكاشير (u2/u3): تسجيل ما يُتلَف من مخزون فرعه فقط، مع السبب والملاحظات — يخصم من المخزون فورًا
+   عند الإدارة (u1): سجل كامل لكل الفروع + مقارنة بينها، دون إمكانية تسجيل إتلاف بنفسها (لا تملك مخزونًا)
+   ===================================================================== */
+const uid = activeUnitId();
+const isHead = (UNITS.find(u => u.id === uid) || {}).type === 'head';
+const WH = warehouseUnits();
+
+let wastePicked = null;   // المنتج المختار حاليًا بنافذة التسجيل
+let wasteSearch = '';
+let wasteQty = 1;
+let wasteReason = WASTE_REASONS[0];
+
+function branchName(id){ return (UNITS.find(u => u.id === id) || {}).name || id; }
+
+function reasonBadgeClass(r){
+  if(r === 'انتهاء الصلاحية') return 'badge-amber';
+  if(r === 'أخرى') return 'badge-muted';
+  return 'badge-clay';
+}
+
+function render(){
+  if(isHead) return renderHeadView();
+  renderBranchView();
+}
+
+/* ---------- عرض الكاشير: سجل إتلاف فرعه فقط + زر تسجيل جديد ---------- */
+function renderBranchView(){
+  const list = wasteFor(uid);
+  const totalQty = list.reduce((s,w) => s + w.qty, 0);
+  const totalCost = list.reduce((s,w) => s + w.qty * w.costAtTime, 0);
+
+  const html = `
+  <div class="section-head">
+    <div>
+      <h2>🗑️ الإتلاف — ${esc(branchName(uid))}</h2>
+      <div class="section-sub">سجل كل ما تم إتلافه من مخزون هذا الفرع مع بيان السبب</div>
+    </div>
+    <button class="btn btn-danger" onclick="openWasteModal()">➕ تسجيل إتلاف جديد</button>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">📦</div><div class="stat-val tabular">${fmtNum(list.length)}</div><div class="stat-lbl">عملية إتلاف مسجّلة</div></div>
+    <div class="stat-card"><div class="stat-icon">🔢</div><div class="stat-val tabular">${fmtNum(totalQty)}</div><div class="stat-lbl">إجمالي القطع المُتلَفة</div></div>
+    <div class="stat-card"><div class="stat-icon">💸</div><div class="stat-val tabular" style="color:var(--clay)">${fmtNum(totalCost)}</div><div class="stat-lbl">قيمة الخسارة بسعر التكلفة</div></div>
+  </div>
+
+  <div class="card-box tbl-scroll">
+    <h3>📋 سجل الإتلاف</h3>
+    <table class="data-tbl">
+      <thead><tr><th>التاريخ</th><th>الصنف</th><th>الكمية</th><th>السبب</th><th>ملاحظات</th><th>الخسارة (تكلفة)</th></tr></thead>
+      <tbody>
+        ${list.length === 0
+          ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:22px;">لا توجد عمليات إتلاف مسجّلة بعد</td></tr>`
+          : list.map(w => `
+          <tr>
+            <td class="tabular">${esc(w.time)}</td>
+            <td>${esc(w.productName)}</td>
+            <td class="tabular">${fmtNum(w.qty)} ${esc(w.unit)}</td>
+            <td><span class="badge ${reasonBadgeClass(w.reason)}">${esc(w.reason)}</span>${w.reasonNote ? `<div class="row-sub">${esc(w.reasonNote)}</div>` : ''}</td>
+            <td>${esc(w.note || '—')}</td>
+            <td class="tabular" style="color:var(--clay);">${fmtNum(w.qty * w.costAtTime)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+}
+
+/* ---------- عرض الإدارة: سجل كل فرع منفصل + مقارنة شاملة ---------- */
+function renderHeadView(){
+  const rows = WH.map(b => {
+    const list = wasteFor(b.id);
+    return {b, list, qty: list.reduce((s,w)=>s+w.qty,0), cost: list.reduce((s,w)=>s+w.qty*w.costAtTime,0)};
+  });
+  const grandQty = rows.reduce((s,r) => s + r.qty, 0);
+  const grandCost = rows.reduce((s,r) => s + r.cost, 0);
+
+  let html = `
+  <div class="section-head">
+    <div>
+      <h2>🗑️ الإتلاف — تقرير موحّد لكل الفروع</h2>
+      <div class="section-sub">صلاحية الإدارة: عرض ومقارنة سجلات الإتلاف بكل فرع دون تسجيل مباشر (لا تملك مخزونًا تشغيليًا)</div>
+    </div>
+  </div>
+
+  <div class="grid-stats">
+    <div class="stat-card"><div class="stat-icon">🔢</div><div class="stat-val tabular">${fmtNum(grandQty)}</div><div class="stat-lbl">إجمالي القطع المُتلَفة (الكل)</div></div>
+    <div class="stat-card"><div class="stat-icon">💸</div><div class="stat-val tabular" style="color:var(--clay)">${fmtNum(grandCost)}</div><div class="stat-lbl">إجمالي الخسارة بسعر التكلفة</div></div>
+  </div>
+
+  <div class="card-box">
+    <h3>🏬 مقارنة الإتلاف بين الفروع</h3>
+    <div class="tbl-scroll">
+      <table class="data-tbl">
+        <thead><tr><th>الفرع</th><th>عدد العمليات</th><th>إجمالي القطع</th><th>قيمة الخسارة</th><th>أكثر الأسباب تكرارًا</th></tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const reasonCounts = {};
+            r.list.forEach(w => reasonCounts[w.reason] = (reasonCounts[w.reason]||0)+1);
+            const topReason = Object.entries(reasonCounts).sort((a,b)=>b[1]-a[1])[0];
+            return `<tr>
+              <td>${esc(r.b.name)}</td>
+              <td class="tabular">${fmtNum(r.list.length)}</td>
+              <td class="tabular">${fmtNum(r.qty)}</td>
+              <td class="tabular" style="color:var(--clay);font-weight:800;">${fmtNum(r.cost)}</td>
+              <td>${topReason ? esc(topReason[0]) + ` <span class="row-sub tabular">(${topReason[1]})</span>` : '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  ${rows.map(r => `
+    <div class="card-box tbl-scroll">
+      <h3>📋 سجل إتلاف ${esc(r.b.name)}</h3>
+      <table class="data-tbl">
+        <thead><tr><th>التاريخ</th><th>الصنف</th><th>الكمية</th><th>السبب</th><th>ملاحظات</th><th>الخسارة</th></tr></thead>
+        <tbody>
+          ${r.list.length === 0
+            ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:18px;">لا توجد عمليات إتلاف مسجّلة بهذا الفرع</td></tr>`
+            : r.list.map(w => `
+            <tr>
+              <td class="tabular">${esc(w.time)}</td>
+              <td>${esc(w.productName)}</td>
+              <td class="tabular">${fmtNum(w.qty)} ${esc(w.unit)}</td>
+              <td><span class="badge ${reasonBadgeClass(w.reason)}">${esc(w.reason)}</span>${w.reasonNote ? `<div class="row-sub">${esc(w.reasonNote)}</div>` : ''}</td>
+              <td>${esc(w.note || '—')}</td>
+              <td class="tabular" style="color:var(--clay);">${fmtNum(w.qty * w.costAtTime)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('')}`;
+
+  document.getElementById('contentArea').innerHTML = html;
+}
+
+/* ---------- نافذة تسجيل إتلاف جديد (كاشير فقط) ---------- */
+function wastePickerFilteredProducts(){
+  const q = wasteSearch.trim();
+  const inStockOnly = products.filter(p => (p.stock[uid] || 0) > 0);
+  if(!q) return inStockOnly;
+  return inStockOnly.filter(p => fuzzyIncludes(p.name, q) || p.barcode.includes(q) || fuzzyIncludes(p.subCat, q) || fuzzyIncludes(p.mainCat, q));
+}
+function wastePickerRowsHtml(){
+  const list = wastePickerFilteredProducts();
+  return list.length === 0
+    ? `<div class="empty-state" style="border:none;"><div class="ic">📦</div><p>لا توجد أصناف مطابقة (أو لا يوجد مخزون متوفر)</p></div>`
+    : list.map(p => `<div class="ac-item" onclick="pickWasteProduct('${p.id}')">
+        <div><div class="ac-name">${esc(p.name)}${p.weight ? ' ('+esc(p.weight)+')' : ''}</div><div class="ac-meta tabular">${esc(p.barcode)} — متوفر: ${fmtNum(p.stock[uid]||0)}</div></div>
+        <span class="badge badge-gold">اختيار</span>
+      </div>`).join('');
+}
+function wasteForm_pickerHtml(){
+  return `<div class="card-box" style="margin-bottom:10px;background:var(--card-hi);">
+    <h3>🔍 اختر الصنف المُراد إتلافه</h3>
+    <div class="search-wrap" style="margin-bottom:8px;">
+      <div class="search-box">
+        <span>🔍</span>
+        <input type="text" id="wastePickerInp" placeholder="ابحث بالاسم أو الباركود أو الصنف..." autocomplete="off"
+               value="${esc(wasteSearch)}" oninput="onWastePickerSearch(this.value)" onkeydown="wastePickerKeydown(event)">
+      </div>
+      <button class="scan-btn" title="مسح الباركود" onclick="scanWasteBarcode()">📷</button>
+    </div>
+    <div id="wastePickerRows" style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:9px;overflow-x:hidden;">
+      ${wastePickerRowsHtml()}
+    </div>
+  </div>`;
+}
+function wasteForm_detailsHtml(){
+  const p = wastePicked;
+  const avail = p.stock[uid] || 0;
+  return `
+  <div class="card-box" style="margin-bottom:10px;">
+    <div class="row-title">${esc(p.name)}${p.weight ? ' ('+esc(p.weight)+')' : ''}</div>
+    <div class="row-sub tabular">متوفر حاليًا: ${fmtNum(avail)} ${esc(p.saleUnit||'')} — يمكن إتلاف جزء من الكمية أو كلها</div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="cancelWastePick()">تغيير الصنف</button>
+  </div>
+  <div class="form-group">
+    <label>الكمية المُتلَفة *</label>
+    <input type="number" id="w_qty" min="1" max="${avail}" value="${wasteQty}" class="tabular" oninput="wasteQty=Number(this.value)||1">
+  </div>
+  <div class="form-group">
+    <label>سبب الإتلاف *</label>
+    <select id="w_reason" onchange="wasteReason=this.value; renderWasteReasonNote();">
+      ${WASTE_REASONS.map(r => `<option value="${esc(r)}" ${wasteReason===r?'selected':''}>${esc(r)}</option>`).join('')}
+    </select>
+  </div>
+  <div id="w_reasonNoteWrap" style="${wasteReason==='أخرى' ? '' : 'display:none;'}" class="form-group">
+    <label>بيان السبب (نص حر)</label>
+    <input type="text" id="w_reasonNote" placeholder="اكتب سبب الإتلاف...">
+  </div>
+  <div class="form-group">
+    <label>ملاحظات إضافية (اختياري)</label>
+    <input type="text" id="w_note" placeholder="أي تفاصيل إضافية...">
+  </div>`;
+}
+function renderWasteReasonNote(){
+  const wrap = document.getElementById('w_reasonNoteWrap');
+  if(wrap) wrap.style.display = wasteReason === 'أخرى' ? '' : 'none';
+}
+function renderWasteForm(){
+  document.getElementById('wasteForm').innerHTML = wastePicked ? wasteForm_detailsHtml() : wasteForm_pickerHtml();
+  const inp = document.getElementById('wastePickerInp');
+  if(inp) inp.focus();
+}
+function onWastePickerSearch(v){
+  wasteSearch = v;
+  const listEl = document.getElementById('wastePickerRows');
+  if(listEl) listEl.innerHTML = wastePickerRowsHtml();
+}
+function wastePickerKeydown(e){
+  if(e.key !== 'Enter') return;
+  const q = wasteSearch.trim();
+  if(!q) return;
+  const exact = products.find(p => p.barcode === q);
+  if(exact){ pickWasteProduct(exact.id); return; }
+  const matches = wastePickerFilteredProducts();
+  if(matches.length === 1) pickWasteProduct(matches[0].id);
+}
+function scanWasteBarcode(){
+  startBarcodeScan(function(code){
+    const p = products.find(x => x.barcode === code);
+    if(!p){ showToast(`لم يتم العثور على صنف بالباركود: ${code}`, '⚠️'); return; }
+    pickWasteProduct(p.id);
+  });
+}
+function pickWasteProduct(pid){
+  const p = products.find(x => x.id === pid);
+  if(!p) return;
+  wastePicked = p;
+  wasteQty = 1;
+  wasteReason = WASTE_REASONS[0];
+  renderWasteForm();
+}
+function cancelWastePick(){
+  wastePicked = null;
+  wasteSearch = '';
+  renderWasteForm();
+}
+function openWasteModal(){
+  wastePicked = null; wasteSearch = ''; wasteQty = 1; wasteReason = WASTE_REASONS[0];
+  renderWasteForm();
+  openModal('wasteModal');
+}
+function submitWaste(){
+  if(!wastePicked){ showToast('اختر الصنف أولًا', '⚠️'); return; }
+  const qtyInp = document.getElementById('w_qty');
+  const qty = qtyInp ? Number(qtyInp.value) || 0 : 0;
+  const avail = wastePicked.stock[uid] || 0;
+  if(qty < 1){ showToast('أدخل كمية صحيحة', '⚠️'); return; }
+  if(qty > avail){ showToast(`الكمية المتوفرة فقط ${avail}`, '⚠️'); return; }
+  const reasonSel = document.getElementById('w_reason');
+  const reason = reasonSel ? reasonSel.value : wasteReason;
+  const reasonNoteInp = document.getElementById('w_reasonNote');
+  const reasonNote = reasonNoteInp ? reasonNoteInp.value.trim() : '';
+  const noteInp = document.getElementById('w_note');
+  const note = noteInp ? noteInp.value.trim() : '';
+  if(reason === 'أخرى' && !reasonNote){ showToast('يرجى كتابة بيان السبب', '⚠️'); return; }
+
+  addWaste({branch: uid, productId: wastePicked.id, qty, reason, reasonNote, note});
+  closeModal('wasteModal');
+  showToast(`تم تسجيل إتلاف ${qty} ${wastePicked.saleUnit||''} من ${wastePicked.name}`, '🗑️');
+  render();
+}
+
+/* ---------- التنبيهات ---------- */
+function renderNotifications(){
+  const list = notificationsFor(uid);
+  const html = list.length === 0
+    ? `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px;">لا توجد تنبيهات حاليًا</div>`
+    : list.map(n => `<div class="list-row"><div class="row-main"><div class="row-title">${esc(n.title)}</div><div class="row-sub">${esc(n.time)}</div></div></div>`).join('');
+  document.getElementById('notifList').innerHTML = html;
+  refreshBellDot();
+}
+
+/* ---------- بدء التشغيل ---------- */
+initShell();
+renderTopbar('الإتلاف');
+renderShellNav('waste');
+render();
+refreshBellDot();
+</script>
+</body>
+</html>
