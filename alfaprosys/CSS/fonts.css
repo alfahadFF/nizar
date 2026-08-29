@@ -1,0 +1,10 @@
+/* AlfaProSys System Fonts Fallback */
+@import url('https://fonts.googleapis.com/css2?family=Changa:wght@500;600;700;800&family=Almarai:wght@400;700;800&display=swap');
+
+body, input, select, button, textarea {
+  font-family: 'Almarai', 'Changa', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+}
+
+.brand-name, .login-hero h1, .role-title, h1, h2, h3, h4 {
+  font-family: 'Changa', 'Almarai', system-ui, sans-serif !important;
+}
