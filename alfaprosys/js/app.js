@@ -1179,4 +1179,57 @@ if (typeof window !== 'undefined') {
   window.findOrCreateCustomer = findOrCreateCustomer;
   window.addWaste = addWaste;
   window.saveSaleToSupabase = saveSaleToSupabase;
+   /* ============================================================
+   تصدير الدوال والمتغيرات للوصول العام من data.js
+   ============================================================ */
+
+if (typeof window !== 'undefined') {
+  // الدوال الأساسية
+  window.activeUnitId = activeUnitId;
+  window.activeUnit = activeUnit;
+  window.getActiveUnit = function() {
+    if (typeof activeUnitId === 'function') {
+      return activeUnitId();
+    }
+    return 'u2';
+  };
+  
+  // المتغيرات
+  window.UNITS = UNITS;
+  
+  // دوال التنسيق
+  window.fmtNum = fmtNum;
+  window.esc = esc;
+  window.normalizeAr = normalizeAr;
+  window.fuzzyIncludes = fuzzyIncludes;
+  window.sortSearchResults = sortSearchResults;
+  
+  // دوال الواجهة
+  window.showToast = showToast;
+  window.openModal = openModal;
+  window.closeModal = closeModal;
+  window.renderShellNav = renderShellNav;
+  window.renderTopbar = renderTopbar;
+  window.initShell = initShell;
+  
+  // دوال الوقت
+  window.nowStr = nowStr;
+  window.daysUntil = daysUntil;
+  
+  // دوال PIN
+  window.getUnitPin = getUnitPin;
+  window.setUnitPin = setUnitPin;
+  window.verifyUnitPin = verifyUnitPin;
+  window.promptUnitPin = promptUnitPin;
+  
+  // دوال الباركود
+  window.startBarcodeScan = startBarcodeScan;
+  window.stopBarcodeScan = stopBarcodeScan;
+  
+  // BroadcastChannel
+  window.broadcastAppEvent = broadcastAppEvent;
+  window.onAppEvent = onAppEvent;
+  
+  console.log('✅ تم تصدير دوال app.js بنجاح');
+}
        }
